@@ -464,12 +464,46 @@ export default function ProfileScreen() {
           Settings
         </Text>
 
+        <CloudCard seed={4} style={{ marginBottom: 24 }}>
+        <View>
+          <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
+            <View style={{ flex: 1, marginRight: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Sunset Alerts</Text>
+              <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
+                {Platform.OS === "web"
+                  ? "Available on iOS & Android only"
+                  : `Notify me 3 min before sunset${sunsetLabel ? ` (${sunsetLabel})` : ""}`}
+              </Text>
+            </View>
+            {togglingAlert
+              ? <ActivityIndicator color={colors.ember} />
+              : <Switch
+                  value={alertsEnabled}
+                  onValueChange={handleAlertToggle}
+                  disabled={Platform.OS === "web"}
+                  trackColor={{ false: colors.mist, true: colors.ember }}
+                  thumbColor="white"
+                />
+            }
+          </View>
+
+          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
+            <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
+              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
+            </Text>
+          </View>
+        </View>
+        </CloudCard>
+
         {/* Account */}
         <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
           Account
         </Text>
 
-        <CloudCard seed={5} style={{ marginBottom: 24 }}>
+        <CloudCard seed={5} style={{ marginBottom: 48 }}>
         <View style={{ padding: 20 }}>
           {authUser ? (
             <>
@@ -581,45 +615,6 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </>
           )}
-        </View>
-        </CloudCard>
-
-        {/* Settings */}
-        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
-          Settings
-        </Text>
-
-        <CloudCard seed={4} style={{ marginBottom: 48 }}>
-        <View>
-          <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
-            <View style={{ flex: 1, marginRight: 16 }}>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Sunset Alerts</Text>
-              <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-                {Platform.OS === "web"
-                  ? "Available on iOS & Android only"
-                  : `Notify me 3 min before sunset${sunsetLabel ? ` (${sunsetLabel})` : ""}`}
-              </Text>
-            </View>
-            {togglingAlert
-              ? <ActivityIndicator color={colors.ember} />
-              : <Switch
-                  value={alertsEnabled}
-                  onValueChange={handleAlertToggle}
-                  disabled={Platform.OS === "web"}
-                  trackColor={{ false: colors.mist, true: colors.ember }}
-                  thumbColor="white"
-                />
-            }
-          </View>
-
-          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
-
-          <View style={{ padding: 20 }}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
-            <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
-            </Text>
-          </View>
         </View>
         </CloudCard>
 

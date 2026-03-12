@@ -111,12 +111,12 @@ export default function HomeScreen() {
   const slideAnim   = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const canvasRef   = useRef<ParticleCanvasHandle>(null);
   const navigating  = useRef(false);
+  const hasRoomsRef = useRef(false);
 
   const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
   const [sunsetTime,  setSunsetTime]  = useState<Date | null>(null);
   const [countdown,   setCountdown]   = useState<string | null>(null);
   const [pastSunset,  setPastSunset]  = useState(false);
-  const [hasRooms,    setHasRooms]    = useState(false);
 
   // Pulse animation
   useEffect(() => {
@@ -141,7 +141,7 @@ export default function HomeScreen() {
       setSunsetLabel(info.formattedLocal);
       setSunsetTime(info.sunsetTime);
     });
-    getLocalRoomCodes().then((codes) => setHasRooms(codes.length > 0));
+    getLocalRoomCodes().then((codes) => { hasRoomsRef.current = codes.length > 0; });
   }, []);
 
   // Live countdown
@@ -168,7 +168,7 @@ export default function HomeScreen() {
       duration: 320,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
-    }).start(() => router.replace(hasRooms ? "/(tabs)/chats" : "/"));
+    }).start(() => router.replace(hasRoomsRef.current ? "/(tabs)/chats" : "/"));
   }
 
   // Pan responder — no setState calls here, so zero re-renders during drag
