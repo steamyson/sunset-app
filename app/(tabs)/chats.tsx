@@ -64,7 +64,9 @@ export default function ChatsScreen() {
     try {
       const room = await joinRoom(joinCode);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const nameMap = await getAllNicknames();
       setRooms((prev) => prev.some((r) => r.id === room.id) ? prev : [room, ...prev]);
+      setNicknames(nameMap);
       setJoinCode("");
       setShowAddRoom(false);
     } catch (e: any) {
@@ -80,7 +82,9 @@ export default function ChatsScreen() {
     try {
       const room = await createRoom();
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const nameMap = await getAllNicknames();
       setRooms((prev) => [room, ...prev]);
+      setNicknames(nameMap);
       setNewlyCreatedCode(room.code);
     } catch (e: any) {
       setAddError(e.message ?? "Something went wrong.");
@@ -235,7 +239,7 @@ export default function ChatsScreen() {
               Create a room and share the code with a friend — they'll join with one tap.
             </Text>
             <TouchableOpacity
-              onPress={() => router.push("/")}
+              onPress={() => setShowAddRoom(true)}
               style={{ marginTop: 24, backgroundColor: colors.ember, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 }}
             >
               <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Create a Room</Text>

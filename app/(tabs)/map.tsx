@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Lazy-load react-native-maps at module level so it's stable across renders
 // and never imported on web where it isn't needed.
@@ -208,8 +208,8 @@ function NativeMap({ messages, myCoords }: {
   myCoords: { latitude: number; longitude: number } | null;
 }) {
   const [selected, setSelected] = useState<Message[] | null>(null);
-  // Only flip between two buckets so state changes are rare, avoiding marker re-render storms
   const [zoomedIn, setZoomedIn] = useState(false);
+  const mapRef = useRef<any>(null);
 
   const USA_REGION = {
     latitude: 39.5,
@@ -218,11 +218,22 @@ function NativeMap({ messages, myCoords }: {
     longitudeDelta: 58,
   };
 
+  function goToMyLocation() {
+    if (!myCoords || !mapRef.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    mapRef.current.animateToRegion({
+      ...myCoords,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    }, 600);
+  }
+
   const clusters = clusterMessages(messages);
 
   return (
     <View style={{ flex: 1 }}>
       <MapView
+        ref={mapRef}
         style={{ flex: 1 }}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         initialRegion={USA_REGION}
@@ -289,6 +300,21 @@ function NativeMap({ messages, myCoords }: {
       </MapView>
 
       {selected && <PinModal messages={selected} onClose={() => setSelected(null)} />}
+
+      {/* Custom locate-me button — bottom right, above tab bar */}
+      <TouchableOpacity
+        onPress={goToMyLocation}
+        style={{
+          position: "absolute", bottom: 28, right: 20,
+          width: 44, height: 44, borderRadius: 22,
+          backgroundColor: colors.cream,
+          alignItems: "center", justifyContent: "center",
+          shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
+        }}
+      >
+        <Ionicons name="locate" size={22} color={colors.ember} />
+      </TouchableOpacity>
     </View>
   );
 }

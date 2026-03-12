@@ -6,9 +6,9 @@ import { useFonts } from "expo-font";
 import { Caveat_400Regular, Caveat_700Bold } from "@expo-google-fonts/caveat";
 import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
-import { getLocalRoomCodes } from "../utils/rooms";
 import { getDeviceId } from "../utils/device";
 import { registerPushToken } from "../utils/push";
+import { getAuthUser, linkDeviceToUser } from "../utils/auth";
 import { SunriseIntro } from "../components/SunriseIntro";
 
 export default function RootLayout() {
@@ -20,14 +20,16 @@ export default function RootLayout() {
       await initNotifications();
       const [nickname, deviceId] = await Promise.all([getLocalNickname(), getDeviceId()]);
       if (deviceId) registerPushToken(deviceId).catch(() => {});
+
+      // If already signed in, keep device linked to account
+      const user = await getAuthUser();
+      if (user) linkDeviceToUser(user.id).catch(() => {});
+
       if (!nickname) {
         router.replace("/setup");
         return;
       }
-      const rooms = await getLocalRoomCodes();
-      if (rooms.length > 0) {
-        router.replace("/home");
-      }
+      router.replace("/home");
     }
     init();
   }, []);

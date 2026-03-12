@@ -5,10 +5,14 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
+  Animated,
+  Easing,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+
+const { width: W, height: H } = Dimensions.get("window");
 import { useFocusEffect } from "expo-router";
 import {
   fetchAllMyMessages,
@@ -27,9 +31,26 @@ import { ReactionBar } from "../../components/ReactionBar";
 import { FilteredImage } from "../../components/FilteredImage";
 import { colors, cloudShape } from "../../utils/theme";
 
-const SCREEN_W = Dimensions.get("window").width;
+const SCREEN_W = W;
 
 export default function FeedScreen() {
+  const glowAnim   = useRef(new Animated.Value(0.5)).current;
+  const pulseScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(glowAnim,   { toValue: 1,    duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowAnim,   { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(pulseScale, { toValue: 1,   duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ])
+    ).start();
+  }, []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
@@ -108,7 +129,44 @@ export default function FeedScreen() {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky }}>
+    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+
+      {/* ── Sunset glow rays ── */}
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 1.6, height: H * 0.55,
+        borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
+        backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
+      }} />
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 1.15, height: H * 0.42,
+        borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
+        backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
+      }} />
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 0.85, height: H * 0.30,
+        borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
+        backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
+      }} />
+
+      {/* ── Sun ── */}
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: -155, alignSelf: "center",
+        transform: [{ scale: pulseScale }],
+      }}>
+        <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
+        <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
+        <View style={{
+          position: "absolute", width: 140, height: 140, borderRadius: 70,
+          backgroundColor: "#FFF59D", left: 85, top: 85,
+          shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
+        }} />
+        <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
+      </Animated.View>
+
+      <SafeAreaView style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 16 }}>
@@ -168,7 +226,8 @@ export default function FeedScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 

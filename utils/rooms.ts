@@ -1,6 +1,7 @@
 import { supabase, Room } from "./supabase";
 import { getDeviceId } from "./device";
 import { getItem, setItem } from "./storage";
+import { assignDefaultRoomNickname } from "./nicknames";
 
 const LOCAL_ROOMS_KEY = "dusk_rooms";
 
@@ -16,7 +17,7 @@ export async function getLocalRoomCodes(): Promise<string[]> {
   return raw ? JSON.parse(raw) : [];
 }
 
-async function addLocalRoomCode(code: string) {
+export async function addLocalRoomCode(code: string) {
   const codes = await getLocalRoomCodes();
   if (!codes.includes(code)) {
     await setItem(LOCAL_ROOMS_KEY, JSON.stringify([...codes, code]));
@@ -48,6 +49,7 @@ export async function createRoom(): Promise<Room> {
   if (error) throw new Error(error.message);
 
   await addLocalRoomCode(code);
+  await assignDefaultRoomNickname(code);
   return data as Room;
 }
 
@@ -74,6 +76,7 @@ export async function joinRoom(code: string): Promise<Room> {
   }
 
   await addLocalRoomCode(upperCode);
+  await assignDefaultRoomNickname(upperCode);
   return { ...room, members: [...room.members, deviceId] } as Room;
 }
 

@@ -8,12 +8,27 @@ import {
   TextInput,
   Modal,
   Alert,
+  Animated,
+  Easing,
+  Dimensions,
+  Image,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type Avatar,
+  PRESET_AVATARS,
+  DEFAULT_AVATAR,
+  getAvatar,
+  saveAvatar,
+  persistPhotoUri,
+} from "../../utils/avatar";
+
 import { useFocusEffect } from "expo-router";
+import { getAuthUser, signInWithEmail, verifyOtp, signOut, signInWithGoogle } from "../../utils/auth";
 import { getAlias } from "../../utils/aliases";
+import type { User } from "@supabase/supabase-js";
 import { getDeviceId } from "../../utils/device";
 import { fetchSunsetTime } from "../../utils/sunset";
 import { getLocalNickname, setLocalNickname, syncDeviceToSupabase } from "../../utils/identity";
@@ -28,9 +43,30 @@ import {
 } from "../../utils/notifications";
 import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
+
 import type { Room } from "../../utils/supabase";
 
+const { width: W, height: H } = Dimensions.get("window");
+
 export default function ProfileScreen() {
+  const glowAnim   = useRef(new Animated.Value(0.5)).current;
+  const pulseScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(glowAnim,   { toValue: 1,    duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowAnim,   { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(pulseScale, { toValue: 1,   duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ])
+    ).start();
+  }, []);
+
   const [alias, setAlias] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [nickname, setNickname] = useState<string>("");
@@ -47,8 +83,20 @@ export default function ProfileScreen() {
   const [nicknameInput, setNicknameInput] = useState("");
   const [savingNickname, setSavingNickname] = useState(false);
 
+  // Avatar
+  const [avatar, setAvatar]           = useState<Avatar>(DEFAULT_AVATAR);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+
   // Leave room confirm
   const [leavingRoom, setLeavingRoom] = useState<Room | null>(null);
+
+  // Auth
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authStep, setAuthStep] = useState<"idle" | "email" | "otp">("idle");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -68,6 +116,10 @@ export default function ProfileScreen() {
         if (sunset) setSunsetLabel(sunset.formattedLocal);
         setRooms(roomList);
         setRoomNicknames(nickMap);
+        const av = await getAvatar();
+        setAvatar(av);
+        const user = await getAuthUser();
+        setAuthUser(user);
         setLoading(false);
       }
       load();
@@ -110,6 +162,41 @@ export default function ProfileScreen() {
     setLeavingRoom(null);
   }
 
+  async function handlePickPhoto() {
+    try {
+      const ImagePicker = require("expo-image-picker");
+      if (!ImagePicker?.requestMediaLibraryPermissionsAsync) {
+        Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
+        return;
+      }
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow photo access to set a profile picture.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      const uri = await persistPhotoUri(result.assets[0].uri);
+      const newAvatar: Avatar = { type: "photo", uri };
+      await saveAvatar(newAvatar);
+      setAvatar(newAvatar);
+      setShowAvatarPicker(false);
+    } catch {
+      Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
+    }
+  }
+
+  async function handleSelectPreset(preset: typeof PRESET_AVATARS[number]) {
+    await saveAvatar(preset);
+    setAvatar(preset);
+    setShowAvatarPicker(false);
+  }
+
   async function handleCreateRoom() {
     setCreatingRoom(true);
     try {
@@ -122,6 +209,80 @@ export default function ProfileScreen() {
     }
   }
 
+  async function handleGoogleSignIn() {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        setAuthUser(user);
+        setAuthStep("idle");
+        const roomList = await (await import("../../utils/rooms")).fetchMyRooms();
+        const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
+        setRooms(roomList);
+        setRoomNicknames(nickMap);
+      }
+    } catch (e: any) {
+      setAuthError(e.message ?? "Google sign in failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleSendCode() {
+    if (!authEmail.trim()) return;
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      await signInWithEmail(authEmail.trim());
+      setAuthStep("otp");
+    } catch (e: any) {
+      setAuthError(e.message ?? "Something went wrong.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleVerifyOtp() {
+    if (!authToken.trim()) return;
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const { restored } = await verifyOtp(authEmail.trim(), authToken.trim());
+      const user = await getAuthUser();
+      setAuthUser(user);
+      setAuthStep("idle");
+      setAuthEmail("");
+      setAuthToken("");
+      if (restored > 0) {
+        const roomList = await (await import("../../utils/rooms")).fetchMyRooms();
+        const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
+        setRooms(roomList);
+        setRoomNicknames(nickMap);
+        Alert.alert("Rooms restored!", `${restored} room${restored === 1 ? "" : "s"} recovered from your previous device.`);
+      }
+    } catch (e: any) {
+      setAuthError(e.message ?? "Invalid code. Please try again.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleSignOut() {
+    Alert.alert("Sign out", "Your rooms will stay on this device.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          await signOut();
+          setAuthUser(null);
+          setAuthStep("idle");
+        },
+      },
+    ]);
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
@@ -131,7 +292,44 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky }}>
+    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+
+      {/* ── Sunset glow rays ── */}
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 1.6, height: H * 0.55,
+        borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
+        backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
+      }} />
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 1.15, height: H * 0.42,
+        borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
+        backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
+      }} />
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: 0, alignSelf: "center",
+        width: W * 0.85, height: H * 0.30,
+        borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
+        backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
+      }} />
+
+      {/* ── Sun ── */}
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", top: -155, alignSelf: "center",
+        transform: [{ scale: pulseScale }],
+      }}>
+        <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
+        <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
+        <View style={{
+          position: "absolute", width: 140, height: 140, borderRadius: 70,
+          backgroundColor: "#FFF59D", left: 85, top: 85,
+          shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
+        }} />
+        <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
+      </Animated.View>
+
+      <SafeAreaView style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1, paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -144,12 +342,27 @@ export default function ProfileScreen() {
         <CloudCard seed={0} style={{ marginTop: 0 }}>
         <View style={{ padding: 24 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-            <View style={{
-              width: 64, height: 64, borderRadius: 32,
-              backgroundColor: colors.mist, alignItems: "center", justifyContent: "center",
-            }}>
-              <Text style={{ fontSize: 28 }}>🌸</Text>
-            </View>
+            <TouchableOpacity onPress={() => setShowAvatarPicker(true)} activeOpacity={0.8}>
+              <View style={{
+                width: 64, height: 64, borderRadius: 32, overflow: "hidden",
+                backgroundColor: avatar.type === "preset" ? avatar.bg : colors.mist,
+                alignItems: "center", justifyContent: "center",
+                borderWidth: 2, borderColor: colors.ember,
+              }}>
+                {avatar.type === "photo"
+                  ? <Image source={{ uri: avatar.uri }} style={{ width: 64, height: 64 }} />
+                  : <Text style={{ fontSize: 28 }}>{avatar.emoji}</Text>
+                }
+              </View>
+              <View style={{
+                position: "absolute", bottom: 0, right: 0,
+                width: 20, height: 20, borderRadius: 10,
+                backgroundColor: colors.ember, alignItems: "center", justifyContent: "center",
+                borderWidth: 1.5, borderColor: colors.cream,
+              }}>
+                <Text style={{ fontSize: 10, color: "white", fontWeight: "800" }}>+</Text>
+              </View>
+            </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal }}>
                 {nickname || alias}
@@ -251,6 +464,131 @@ export default function ProfileScreen() {
           Settings
         </Text>
 
+        {/* Account */}
+        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
+          Account
+        </Text>
+
+        <CloudCard seed={5} style={{ marginBottom: 24 }}>
+        <View style={{ padding: 20 }}>
+          {authUser ? (
+            <>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <Text style={{ fontSize: 24 }}>☀️</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal }}>Backed up</Text>
+                  <Text style={{ fontSize: 13, color: colors.ash, marginTop: 2 }}>{authUser.email}</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 13, color: colors.ash, lineHeight: 18, marginBottom: 16 }}>
+                Your rooms are safe. Sign in with this email on a new device to restore everything.
+              </Text>
+              <TouchableOpacity onPress={handleSignOut} style={{ alignSelf: "flex-start" }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: colors.magenta }}>Sign Out</Text>
+              </TouchableOpacity>
+            </>
+          ) : authStep === "otp" ? (
+            <>
+              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal, marginBottom: 4 }}>Check your email</Text>
+              <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 16 }}>Enter the 6-digit code sent to {authEmail}</Text>
+              <TextInput
+                value={authToken}
+                onChangeText={(t) => { setAuthError(null); setAuthToken(t.replace(/[^0-9]/g, "").slice(0, 6)); }}
+                placeholder="000000"
+                placeholderTextColor={colors.ash}
+                keyboardType="number-pad"
+                autoFocus
+                style={{
+                  backgroundColor: "white", borderWidth: 1.5,
+                  borderColor: authToken.length > 0 ? colors.ember : colors.mist,
+                  borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+                  fontSize: 28, fontWeight: "800", letterSpacing: 8,
+                  color: colors.charcoal, textAlign: "center", marginBottom: 12,
+                }}
+              />
+              {authError && <Text style={{ color: colors.magenta, fontSize: 13, marginBottom: 12 }}>{authError}</Text>}
+              <TouchableOpacity
+                onPress={handleVerifyOtp}
+                disabled={authLoading || authToken.length < 6}
+                style={{ backgroundColor: colors.ember, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginBottom: 10, opacity: authToken.length < 6 ? 0.5 : 1 }}
+              >
+                {authLoading ? <ActivityIndicator color="white" /> : <Text style={{ fontSize: 15, fontWeight: "800", color: "white" }}>Verify Code</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setAuthStep("email"); setAuthToken(""); setAuthError(null); }} style={{ alignItems: "center", paddingVertical: 8 }}>
+                <Text style={{ fontSize: 13, color: colors.ash }}>Use a different email</Text>
+              </TouchableOpacity>
+            </>
+          ) : authStep === "email" ? (
+            <>
+              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal, marginBottom: 4 }}>Back up your rooms</Text>
+              <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 16 }}>If you lose your phone, sign in with this email to restore everything.</Text>
+              <TextInput
+                value={authEmail}
+                onChangeText={(t) => { setAuthError(null); setAuthEmail(t); }}
+                placeholder="your@email.com"
+                placeholderTextColor={colors.ash}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                style={{
+                  backgroundColor: "white", borderWidth: 1.5,
+                  borderColor: authEmail.length > 0 ? colors.ember : colors.mist,
+                  borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+                  fontSize: 16, color: colors.charcoal, marginBottom: 12,
+                }}
+              />
+              {authError && <Text style={{ color: colors.magenta, fontSize: 13, marginBottom: 12 }}>{authError}</Text>}
+              <TouchableOpacity
+                onPress={handleSendCode}
+                disabled={authLoading || !authEmail.trim()}
+                style={{ backgroundColor: colors.ember, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginBottom: 10, opacity: !authEmail.trim() ? 0.5 : 1 }}
+              >
+                {authLoading ? <ActivityIndicator color="white" /> : <Text style={{ fontSize: 15, fontWeight: "800", color: "white" }}>Send Code</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setAuthStep("idle"); setAuthEmail(""); setAuthError(null); }} style={{ alignItems: "center", paddingVertical: 8 }}>
+                <Text style={{ fontSize: 13, color: colors.ash }}>Cancel</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <Text style={{ fontSize: 24 }}>🔓</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal }}>No account yet</Text>
+                  <Text style={{ fontSize: 13, color: colors.ash, marginTop: 2 }}>Your rooms only exist on this device</Text>
+                </View>
+              </View>
+              {authError && <Text style={{ color: colors.magenta, fontSize: 13, marginBottom: 12 }}>{authError}</Text>}
+              <TouchableOpacity
+                onPress={handleGoogleSignIn}
+                disabled={authLoading}
+                style={{ backgroundColor: "white", borderRadius: 14, paddingVertical: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 10, borderWidth: 1.5, borderColor: colors.mist, marginBottom: 10 }}
+              >
+                {authLoading
+                  ? <ActivityIndicator color={colors.charcoal} />
+                  : <>
+                      <Text style={{ fontSize: 16 }}>🇬</Text>
+                      <Text style={{ fontSize: 15, fontWeight: "800", color: colors.charcoal }}>Continue with Google</Text>
+                    </>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setAuthStep("email")}
+                style={{ backgroundColor: colors.charcoal, borderRadius: 14, paddingVertical: 14, alignItems: "center" }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: "800", color: colors.cream }}>Continue with Email</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+        </CloudCard>
+
+        {/* Settings */}
+        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
+          Settings
+        </Text>
+
         <CloudCard seed={4} style={{ marginBottom: 48 }}>
         <View>
           <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
@@ -279,7 +617,7 @@ export default function ProfileScreen() {
           <View style={{ padding: 20 }}>
             <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
             <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-              Photos expire after 24 hours. No accounts. No data stored beyond your device and rooms.
+              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
             </Text>
           </View>
         </View>
@@ -329,6 +667,57 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      {/* Avatar picker modal */}
+      <Modal visible={showAvatarPicker} transparent animationType="slide" onRequestClose={() => setShowAvatarPicker(false)}>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.45)", justifyContent: "flex-end" }}
+          activeOpacity={1}
+          onPress={() => setShowAvatarPicker(false)}
+        >
+          <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 48 }}>
+            <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 6, textAlign: "center" }}>Choose your look</Text>
+            <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 20, textAlign: "center" }}>Pick a vibe or use your own photo</Text>
+
+            {/* Preset grid */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 20, justifyContent: "center" }}>
+              {PRESET_AVATARS.map((p) => {
+                const isSelected = avatar.type === "preset" && avatar.id === p.id;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => handleSelectPreset(p)}
+                    activeOpacity={0.8}
+                    style={{
+                      width: 60, height: 60, borderRadius: 30,
+                      backgroundColor: p.bg,
+                      alignItems: "center", justifyContent: "center",
+                      borderWidth: isSelected ? 3 : 1.5,
+                      borderColor: isSelected ? colors.ember : "rgba(0,0,0,0.08)",
+                    }}
+                  >
+                    <Text style={{ fontSize: 26 }}>{p.emoji}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Upload photo */}
+            <TouchableOpacity
+              onPress={handlePickPhoto}
+              activeOpacity={0.85}
+              style={{
+                backgroundColor: colors.charcoal, borderRadius: 16,
+                paddingVertical: 16, alignItems: "center", flexDirection: "row",
+                justifyContent: "center", gap: 10,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>🖼️</Text>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.cream }}>Upload a Photo</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Leave room confirm modal */}
       <Modal visible={leavingRoom !== null} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.5)", alignItems: "center", justifyContent: "center", padding: 32 }}>
@@ -357,6 +746,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

@@ -2,6 +2,39 @@ import { getItem, setItem } from "./storage";
 
 const KEY = "dusk_nicknames";
 
+const DEFAULT_ROOM_NAMES = [
+  "Grand Army Glow",
+  "Delancey Dusk",
+  "Atlantic Ember",
+  "Fulton Fade",
+  "Flatiron Haze",
+  "Dekalb Amber",
+  "Nostrand Light",
+  "Broadway Burn",
+  "Bowery Gold",
+  "Canal Crimson",
+  "Prospect Dusk",
+  "Bedford Blaze",
+  "Myrtle Ember",
+  "Flatbush Flame",
+  "Classon Gold",
+  "Halsey Horizon",
+  "Flushing Fade",
+  "Jamaica Glow",
+  "Rockaway Radiance",
+  "Coney Crimson",
+  "Hudson Haze",
+  "Chelsea Char",
+  "Bleecker Burn",
+  "Rivington Rose",
+  "Orchard Amber",
+  "Lenox Light",
+  "Morningside Glow",
+  "Riverside Ember",
+  "Fordham Fade",
+  "Pelham Pulse",
+];
+
 async function load(): Promise<Record<string, string>> {
   const raw = await getItem(KEY);
   return raw ? JSON.parse(raw) : {};
@@ -20,4 +53,12 @@ export async function setRoomNickname(code: string, nickname: string): Promise<v
 
 export async function getAllNicknames(): Promise<Record<string, string>> {
   return load();
+}
+
+export async function assignDefaultRoomNickname(code: string): Promise<void> {
+  const map = await load();
+  if (map[code]) return; // already has a nickname
+  const name = DEFAULT_ROOM_NAMES[Math.floor(Math.random() * DEFAULT_ROOM_NAMES.length)];
+  map[code] = name;
+  await setItem(KEY, JSON.stringify(map));
 }
