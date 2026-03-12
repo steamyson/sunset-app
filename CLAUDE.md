@@ -1,108 +1,67 @@
-# Dusk — CLAUDE.md
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this app is
 
-Dusk is a React Native (Expo) mobile app centered on the daily sunset. Users create or join ephemeral chat "rooms" that are tied to the golden hour — the idea is to catch the sunset together with people you care about. The home screen shows a live countdown to today's sunset and a swipe-to-enter gesture. The chats screen is a sky canvas where room clouds float, are draggable, and can be tapped to enter a chat.
+Dusk is a React Native (Expo) mobile app centered on the daily sunset. Users create or join ephemeral chat "rooms" tied to the golden hour. The home screen shows a live countdown to today's sunset. The chats screen is a sky canvas where room clouds float, are draggable, and can be tapped to enter a chat.
 
-## Tech stack
+## Commands
 
-- **Framework**: Expo SDK 55, Expo Router (file-based routing)
-- **Language**: TypeScript, React 19
-- **UI**: React Native core + `react-native-svg` for cloud SVGs, `react-native-safe-area-context`
-- **Animations**: React Native `Animated` API (not Reanimated) with `useNativeDriver: true` where possible; `useNativeDriver: false` required for layout-affecting values (zoom/pan)
-- **Backend**: Supabase (auth, realtime, database) — client in `utils/supabase.ts`
-- **Storage**: `expo-secure-store` (via `utils/storage.ts` wrapper that falls back to `localStorage` on web)
-- **Haptics**: `expo-haptics`
-- **Navigation**: `expo-router` with `router.push` / `router.replace`
-
-## File map
-
-```
-app/
-  index.tsx          — entry point / redirect logic
-  home.tsx           — sunset countdown screen with particle effect
-  setup.tsx          — onboarding
-  fonts.tsx          — font loader
-  _layout.tsx        — root layout
-  (tabs)/
-    _layout.tsx      — tab bar layout
-    chats.tsx        — ★ main sky canvas screen (room clouds, drag, pan, zoom)
-    capture.tsx      — camera / photo capture
-    map.tsx          — sunset map
-    profile.tsx      — user profile
-  room/[code].tsx    — individual chat room
-
-components/
-  SkyCloud.tsx       — ★ SVG cloud shape + SkyCloud (room cloud) + DecorativeCloud
-  Text.tsx           — custom Text component (handles fonts)
-  CloudCard.tsx      — legacy card style (not used on sky canvas)
-  CropView, FilterView, FilteredImage, ReactionBar, RecipientSelector, SunriseIntro
-
-utils/
-  theme.ts           — colors, typography, spacing, gradients, cloudShape()
-  supabase.ts        — Supabase client + Room type
-  auth.ts            — sign in, OTP verify, Google OAuth, device linking
-  rooms.ts           — fetchMyRooms, createRoom, joinRoom, leaveRoom, getLocalRoomCodes
-  nicknames.ts       — per-room display names stored locally
-  messages.ts        — send/fetch messages
-  lastSeen.ts        — read receipts
-  storage.ts         — SecureStore wrapper (web fallback: localStorage)
-  device.ts          — stable device ID
-  sunset.ts          — fetchSunsetTime() (uses location + sunset API)
-  notifications.ts, push.ts, reactions.ts, filters.ts, geocoding.ts, mapStyle.ts
+```bash
+npm start                          # Start Expo dev server (interactive, shows QR code)
+npm start -- --tunnel              # Start with ngrok tunnel (for physical devices)
+npm start -- --tunnel --port 8083  # Use alternate port if 8081 is taken
+npm run ios                        # iOS simulator
+npm run android                    # Android emulator/device
+npx tsc --noEmit                   # Type-check without building
+eas build --profile development    # Build dev client APK (internal distribution)
+eas build --profile preview        # Build preview APK
+eas build --profile production     # Production build
 ```
 
-## Key design decisions
+No lint or test scripts are configured. TypeScript strict mode is on — run `npx tsc --noEmit` to catch type errors.
+
+The app requires `expo-dev-client` (not Expo Go) because it uses native modules (SecureStore, notifications, camera).
+
+## Architecture
+
+### Routing
+
+Expo Router with file-based routing. `app/index.tsx` is the entry — it redirects to `home` or `/(tabs)/chats` depending on state. The tab layout lives in `app/(tabs)/`. Deep links use the `dusk://` scheme.
 
 ### Sky canvas (`app/(tabs)/chats.tsx`)
 
-- Canvas is `SKY_W = W * 2.2` × `SKY_H = H * 2.2` — larger than screen so clouds can be spread out
-- Canvas `Animated.View` uses `[translateX, translateY, scale]` transform (not `useNativeDriver` because scale + translate can't mix with native driver on layout values)
-- **Gesture priority**: Cloud pan responders use `onStartShouldSetPanResponder: true` — they always win on initial touch. The sky pan responder uses `onStartShouldSetPanResponder: false` + `onMoveShouldSetPanResponder: true` — it only claims on move, so clouds always get first pick.
-- **No gesture stealing**: Both sky and cloud responders use `onPanResponderTerminationRequest: () => false`
-- **Pinch zoom**: Midpoint-anchored; pinch state (`isPinching`, `lastPinchDist`) lives in an IIFE closure on the sky responder ref so it never re-creates
-- **Collision detection**: AABB test with 2-pass resolution on drop; also runs on new cloud init (no saved position)
-- **Cloud positions** persist to SecureStore under key `"cloud_pos_v1"` as `Record<code, {x,y}>`
-- **Fit-to-content**: On every screen focus, `fitCloudsToView()` computes the bounding box of all clouds and springs zoom + pan to show them all as large as possible. Formula: `tx = (vw/2 - bboxCX) * s`
-- Long-hold (500ms, no movement) → options sheet. Tap → zoom animation → navigate to room. Hold + move → drag.
+The most complex screen. Key architecture:
+
+- **Canvas space**: `SKY_W = W * 2.2`, `SKY_H = H * 2.2` — larger than screen so clouds spread out. A single `Animated.View` wraps everything with `[translateX, translateY, scale]` transform.
+- **`useNativeDriver: false`** is required on the canvas — RN can't mix native driver with `scale` + `translateX/Y` on the same view.
+- **Gesture system**: Cloud pan responders (`onStartShouldSetPanResponder: true`) always win initial touch. Sky pan responder (`onStartShouldSetPanResponder: false`, `onMoveShouldSetPanResponder: true`) only claims on move. Both use `onPanResponderTerminationRequest: () => false` to block stealing.
+- **Pinch-to-zoom**: Midpoint-anchored. Pinch state lives in an IIFE closure on the sky responder ref (never recreated). `canvasZoomValue` ref mirrors `canvasZoom` via `addListener` for synchronous reads during gesture math.
+- **Fit-to-content**: `fitCloudsToView()` runs on every screen focus. Computes bbox of all cloud positions → scale `s = min(vw/bboxW, vh/bboxH)` → pan `tx = (vw/2 - bboxCX) * s`. Calls `canvasPan.flattenOffset()` before springing to an absolute position.
+- **Cloud positions** persist to SecureStore under key `"cloud_pos_v1"` as `Record<roomCode, {x,y}>`. Read in `loadSavedPositions()`, written in `saveCloudPosition()`.
+- **Collision detection**: AABB test with 2-pass resolution. Runs on drop and on new cloud init (no saved position). Uses `(anim.x as any)._value` to read current animated positions synchronously.
+- **Pan pattern**: `extractOffset()` on gesture grant, `flattenOffset()` on release — accumulated pan across gestures.
+- **Cloud interactions**: Long-hold 500ms without movement → options sheet. Tap → zoom animation → `router.push`. Hold + move > 8px → drag. `pressTimer` ref tracks the long-press timeout.
 
 ### Cloud SVG (`components/SkyCloud.tsx`)
 
-- ViewBox: `0 0 240 185` (VB_H=185 is tall enough for bottom bumps to not clip)
-- 8 shape variants (0–3 top-only, 4–7 mirrored top+bottom bumps)
-- Render order matters: top bumps → base ellipse → bottom bumps (base covers inner halves of top bumps; bottom bumps protrude below)
-- Bottom bump math: `protrusion = base_top_edge - (bump_cy - bump_r)`, `mirror_cy = base_bottom_edge + protrusion - r`
-- `ASPECT = VB_H / VB_W = 185/240` — always use this ratio for cloud height from width
-- `DecorativeCloud`: independent `floatX`/`floatY` Animated loops for drifting
+- ViewBox `0 0 240 185` — VB_H=185 is intentionally tall to prevent bottom bumps from clipping.
+- `ASPECT = 185/240` — always derive cloud height as `width * ASPECT`.
+- 8 shape variants: 0–3 are top-bumps-only, 4–7 have mirrored top+bottom bumps.
+- **Render order matters**: top bumps → base ellipse → bottom bumps. The base ellipse covers the inner halves of top bumps; bottom bumps protrude below.
+- Bottom bump placement: `protrusion = base_top_edge - (bump_cy - bump_r)`, `mirror_cy = base_bottom_edge + protrusion - r`.
+- `SkyCloud` is a `forwardRef<View>` — parent holds refs for `measureInWindow` on tap-to-zoom.
+- `DecorativeCloud` runs independent `floatX`/`floatY` `Animated.loop` sequences for drifting.
+- Room variant is deterministic from room code: `code.charCodeAt sum % 8` — never changes.
 
-### Animated values pattern
+### Data layer
 
-- Cloud positions: `Animated.ValueXY` with `extractOffset()` on grant, `flattenOffset()` on release — classic accumulated pan pattern
-- Canvas pan: same pattern; `flattenOffset()` must be called before springing to an absolute position (e.g. fit-to-content)
-- JS-mirror: `canvasZoomValue = useRef(1)` updated via `canvasZoom.addListener` — needed for pinch math since `_value` reads are synchronous but listener-based mirror is cleaner
+- **Supabase** (`utils/supabase.ts`): single client instance, SecureStore session adapter. Env vars: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`.
+- **Inferred schema**: `devices(device_id, user_id)`, `rooms(id, code, host_device_id, members[], created_at)` where `members` is a device ID array.
+- **Local storage** (`utils/storage.ts`): thin wrapper — SecureStore on native, `localStorage` on web.
+- Auth is optional — users get a device ID (`utils/device.ts`) immediately. Email OTP or Google OAuth links device to a user account, which enables room restore across devices.
 
-### Supabase schema (inferred)
+### Theme
 
-- `devices(device_id, user_id)` — maps device to optional auth user
-- `rooms(id, code, host_device_id, members[], nickname, created_at)` — `members` is an array of device IDs
-- `messages` — per-room messages with timestamps
-- Env vars: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`
-
-## Running the app
-
-```bash
-npm start          # Expo dev server
-npm run ios        # iOS simulator
-npm run android    # Android emulator/device
-```
-
-Uses `expo-dev-client` — must run on a development build, not Expo Go, for SecureStore and other native modules.
-
-## Conventions
-
-- No default export for utilities — named exports only
-- Colors always from `utils/theme.ts` `colors` object — never hardcoded hex in components (exception: cloud fill colors which are intentionally white/warm white)
-- `Text` component from `components/Text.tsx` instead of RN's `Text` (handles custom font)
-- `useNativeDriver: false` any time a transform includes `scale` alongside pan on the same view (RN limitation: can't mix native and JS driver on same node)
-- Cloud height always derived: `height = width * (185 / 240)`
-- Room variant (cloud shape) derived from room code hash — stable, never random: `code.charCodeAt sum % 8`
+All colors come from `utils/theme.ts` `colors` object. Never use hardcoded hex in components (exception: cloud fill which is intentionally warm white). Use `components/Text.tsx` instead of RN's `Text` for custom font support.

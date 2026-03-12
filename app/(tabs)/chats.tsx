@@ -1,3 +1,4 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   TouchableOpacity,
@@ -13,7 +14,6 @@ import {
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -60,6 +60,25 @@ const STORAGE_KEY = "cloud_pos_v1";
 function roomVariant(code: string): number {
   return code.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 8;
 }
+
+// Deterministic globe position from room code (longitude/latitude in radians)
+function roomGlobePos(code: string): { lon: number; lat: number } {
+  const sum = code.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return {
+    lon: ((sum * 137.508) % 360) * (Math.PI / 180),
+    lat: (((sum * 67.1)   % 60) - 30) * (Math.PI / 180),
+  };
+}
+
+const GLOBE_R = Math.min(W, H * 0.65) * 0.40;
+
+// Deterministic star field for globe background (no Math.random — stable across renders)
+const GLOBE_STARS = Array.from({ length: 44 }, (_, i) => ({
+  x: (i * 53.7 + 11)  % W,
+  y: (i * 97.3 + 19)  % (H * 0.88),
+  r: 0.5 + (i * 7  % 3) * 0.5,
+  o: 0.3 + (i * 13 % 10) * 0.04,
+}));
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
@@ -122,10 +141,38 @@ export default function ChatsScreen() {
   const canvasCenter    = useRef({ x: W / 2, y: H / 2 }); // updated on layout
   const canvasViewSize  = useRef({ width: W, height: H * 0.75 }); // updated on layout
 
-  // Track zoom value from both spring animations and direct setValue
+  // canvasZoom drives both opacity interpolations — no separate globeProgress / canvasOpacity values
+  const canvasViewOpacity = canvasZoom.interpolate({ inputRange: [0.22, 0.38], outputRange: [0, 1], extrapolate: "clamp" });
+  const globeViewOpacity  = canvasZoom.interpolate({ inputRange: [0.22, 0.38], outputRange: [1, 0], extrapolate: "clamp" });
+
+  // Track zoom value; also auto-toggle globe visibility / interactivity from the zoom value
+  const globeVisibleRef = useRef(false);
   useEffect(() => {
-    const id = canvasZoom.addListener(({ value }) => { canvasZoomValue.current = value; });
+    const id = canvasZoom.addListener(({ value }) => {
+      canvasZoomValue.current = value;
+      // Globe becomes visible as user zooms far out
+      if (value <= 0.38 && !globeVisibleRef.current) {
+        globeVisibleRef.current = true;
+        setGlobeVisible(true);
+      } else if (value > 0.45 && globeVisibleRef.current) {
+        globeVisibleRef.current = false;
+        setGlobeVisible(false);
+      }
+      // Globe interactivity (pointer events) switches at a tighter band
+      if (value <= 0.27 && !globeModeRef.current) {
+        globeModeRef.current = true;
+        setGlobeMode(true);
+      } else if (value > 0.32 && globeModeRef.current) {
+        globeModeRef.current = false;
+        setGlobeMode(false);
+      }
+    });
     return () => canvasZoom.removeListener(id);
+  }, []);
+
+  // Stop float loops on unmount
+  useEffect(() => {
+    return () => { Object.values(cloudFloatLoops.current).forEach(l => l.stop()); };
   }, []);
 
   // Fit all clouds into view as large as possible
@@ -218,7 +265,7 @@ export default function ChatsScreen() {
 
           if (lastPinchDist > 0) {
             const ratio   = dist / lastPinchDist;
-            const newZoom = Math.max(0.25, Math.min(3.0, canvasZoomValue.current * ratio));
+            const newZoom = Math.max(0.15, Math.min(3.0, canvasZoomValue.current * ratio));
             const actual  = newZoom / canvasZoomValue.current; // ratio after clamping
 
             canvasZoom.setValue(newZoom);
@@ -257,6 +304,15 @@ export default function ChatsScreen() {
   const panResponders    = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
   const cloudSlotIndex   = useRef<Record<string, number>>({});  // room.id → slot index
   const roomsRef         = useRef<Room[]>([]);                  // live rooms list for collision
+
+  // Per-cloud drift float animations
+  const cloudFloats     = useRef<Record<string, Animated.Value>>({});
+  const cloudFloatLoops = useRef<Record<string, { stop: () => void }>>({});
+
+  // Globe mode
+  const [globeMode,    setGlobeMode]    = useState(false);
+  const [globeVisible, setGlobeVisible] = useState(false);
+  const globeModeRef   = useRef(false);
 
   // ─── Collision detection ─────────────────────────────────────────────────────
   function resolveCollisions(
@@ -299,6 +355,7 @@ export default function ChatsScreen() {
   onOptionsRef.current = (room) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setOptionsRoom(room); };
   roomsRef.current     = rooms; // keep live reference for collision detection
 
+
   // ─── Persist / restore cloud positions ──────────────────────────────────────
   async function loadSavedPositions() {
     try {
@@ -338,6 +395,33 @@ export default function ChatsScreen() {
     }
     return cloudScales.current[room.id];
   }
+
+  function getOrInitFloat(room: Room): Animated.Value {
+    if (!cloudFloats.current[room.id]) {
+      cloudFloats.current[room.id] = new Animated.Value(0);
+    }
+    return cloudFloats.current[room.id];
+  }
+
+  // Start / update float animations whenever the room list changes
+  useEffect(() => {
+    rooms.slice(0, 8).forEach(room => {
+      if (cloudFloatLoops.current[room.id]) return; // already running
+      const val   = getOrInitFloat(room);
+      const v     = roomVariant(room.code);
+      const dur   = 18000 + v * 2000;  // 18–32 s — slow orbit feel
+      const drift = 180  + v * 25;    // 180–355 px — goes well off-screen
+      const loop  = Animated.loop(
+        Animated.sequence([
+          Animated.timing(val, { toValue:  drift, duration: dur * 0.5, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+          Animated.timing(val, { toValue: -drift, duration: dur,       easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+          Animated.timing(val, { toValue:  0,     duration: dur * 0.5, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+        ])
+      );
+      loop.start();
+      cloudFloatLoops.current[room.id] = loop;
+    });
+  }, [rooms]);
 
   function getOrCreatePanResponder(room: Room, slotIndex: number) {
     if (panResponders.current[room.id]) return panResponders.current[room.id];
@@ -569,8 +653,8 @@ export default function ChatsScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <ParticleTrail style={{ backgroundColor: colors.sky }}>
-    <View ref={rootViewRef} style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+    <View ref={rootViewRef} style={{ flex: 1 }} {...skyPanResponder.panHandlers}>
 
       {/* Sunset glow rays */}
       <Animated.View pointerEvents="none" style={{
@@ -655,19 +739,21 @@ export default function ChatsScreen() {
         ) : (
           <Animated.View
             onLayout={(e) => {
-              const { x, y, width, height } = e.nativeEvent.layout;
-              canvasCenter.current = { x: x + width / 2, y: y + height / 2 };
+              const { width, height } = e.nativeEvent.layout;
+              // Use full screen center as pinch pivot so zooming works from anywhere
+              canvasCenter.current = { x: W / 2, y: H / 2 };
               canvasViewSize.current = { width, height };
             }}
+            pointerEvents={globeMode ? "none" : "auto"}
             style={{
               flex: 1,
+              opacity: canvasViewOpacity,
               transform: [
                 { translateX: canvasPan.x },
                 { translateY: canvasPan.y },
                 { scale: canvasZoom },
               ],
             }}
-            {...skyPanResponder.panHandlers}
           >
             {/* Decorative background clouds */}
             {DECORATIVE.map((d, i) => (
@@ -677,46 +763,71 @@ export default function ChatsScreen() {
 
             {/* Room clouds — freely draggable */}
             {rooms.slice(0, 8).map((room, i) => {
-              const slot  = CLOUD_SLOTS[i % CLOUD_SLOTS.length];
-              const cw    = BASE_CLOUD_W * slot.scale;
-              const anim  = getOrInitAnim(room, i);
+              const slot      = CLOUD_SLOTS[i % CLOUD_SLOTS.length];
+              const cw        = BASE_CLOUD_W * slot.scale;
+              const anim      = getOrInitAnim(room, i);
               const scaleAnim = getOrInitScale(room);
-              const pr    = getOrCreatePanResponder(room, i);
+              const floatAnim = getOrInitFloat(room);
+              const pr        = getOrCreatePanResponder(room, i);
 
               return (
                 <Animated.View
                   key={room.id}
-                  style={{
-                    position: "absolute",
-                    transform: [
-                      { translateX: anim.x },
-                      { translateY: anim.y },
-                      { scale: scaleAnim },
-                    ],
-                    // Lifted shadow
-                    shadowColor: "#000",
-                    shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
-                    shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
-                    shadowRadius:  liftedRoomId === room.id ? 16 : 4,
-                    elevation:     liftedRoomId === room.id ? 12 : 2,
-                    zIndex:        liftedRoomId === room.id ? 20 : 1,
-                  }}
-                  {...pr.panHandlers}
+                  pointerEvents="box-none"
+                  style={{ position: "absolute", transform: [{ translateX: floatAnim }] }}
                 >
-                  <SkyCloud
-                    ref={(r) => { cloudRefs.current[room.id] = r; }}
-                    name={nicknames[room.code] ?? room.code}
-                    width={cw}
-                    unread={unreadRooms.has(room.code)}
-                    lifted={liftedRoomId === room.id}
-                    variant={roomVariant(room.code)}
-                  />
+                  <Animated.View
+                    style={{
+                      transform: [
+                        { translateX: anim.x },
+                        { translateY: anim.y },
+                        { scale: scaleAnim },
+                      ],
+                      // Lifted shadow
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
+                      shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
+                      shadowRadius:  liftedRoomId === room.id ? 16 : 4,
+                      elevation:     liftedRoomId === room.id ? 12 : 2,
+                      zIndex:        liftedRoomId === room.id ? 20 : 1,
+                    }}
+                    {...pr.panHandlers}
+                  >
+                    <SkyCloud
+                      ref={(r) => { cloudRefs.current[room.id] = r; }}
+                      name={nicknames[room.code] ?? room.code}
+                      width={cw}
+                      unread={unreadRooms.has(room.code)}
+                      lifted={liftedRoomId === room.id}
+                      variant={roomVariant(room.code)}
+                    />
+                  </Animated.View>
                 </Animated.View>
               );
             })}
           </Animated.View>
         )}
       </SafeAreaView>
+
+      {/* Globe mode overlay — fades in continuously as canvas zoom decreases */}
+      {globeVisible && (
+        <Animated.View
+          pointerEvents={globeMode ? "auto" : "none"}
+          style={{
+            position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+            opacity: globeViewOpacity,
+          }}
+        >
+          <GlobeView
+            rooms={rooms}
+            nicknames={nicknames}
+            unreadRooms={unreadRooms}
+            cloudFloats={cloudFloats}
+            canvasZoom={canvasZoom}
+            canvasZoomValueRef={canvasZoomValue}
+          />
+        </Animated.View>
+      )}
 
       {/* Zoom overlay */}
       {zoomOrigin && (
@@ -919,6 +1030,211 @@ export default function ChatsScreen() {
         </View>
       </Modal>
     </View>
-    </ParticleTrail>
+    </View>
+  );
+}
+
+// ─── Globe view ───────────────────────────────────────────────────────────────
+function GlobeView({
+  rooms,
+  nicknames,
+  unreadRooms,
+  cloudFloats,
+  canvasZoom,
+  canvasZoomValueRef,
+}: {
+  rooms: Room[];
+  nicknames: Record<string, string>;
+  unreadRooms: Set<string>;
+  cloudFloats: React.MutableRefObject<Record<string, Animated.Value>>;
+  canvasZoom: Animated.Value;
+  canvasZoomValueRef: React.MutableRefObject<number>;
+}) {
+  const rotLonRef = useRef(0);
+  const rotLatRef = useRef(0);
+  const [rot, setRot] = useState({ lon: 0, lat: 0 });
+
+  const startLon      = useRef(0);
+  const startLat      = useRef(0);
+  const isPinching    = useRef(false);
+  const lastDist      = useRef(0);
+  const isDragging    = useRef(false);
+
+  // Auto-rotate globe slowly when not being dragged
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!isDragging.current) {
+        rotLonRef.current += 0.004;
+        setRot(r => ({ lon: rotLonRef.current, lat: r.lat }));
+      }
+    }, 50);
+    return () => clearInterval(t);
+  }, []);
+
+  // Read current float offset for a room cloud (maps flat drift → globe longitude offset)
+  function cloudLonOffset(roomId: string): number {
+    const val = cloudFloats.current[roomId];
+    if (!val) return 0;
+    return (val as any)._value * 0.0015;
+  }
+
+  const globePan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder:     () => true,
+      onPanResponderTerminationRequest: () => false,
+
+      onPanResponderGrant: (e) => {
+        startLon.current = rotLonRef.current;
+        startLat.current = rotLatRef.current;
+        isPinching.current = false;
+        lastDist.current   = 0;
+        isDragging.current = false;
+        const t = e.nativeEvent.touches;
+        if (t.length >= 2) {
+          isPinching.current = true;
+          const dx = t[0].pageX - t[1].pageX;
+          const dy = t[0].pageY - t[1].pageY;
+          lastDist.current = Math.sqrt(dx * dx + dy * dy);
+        }
+      },
+
+      onPanResponderMove: (e, gs) => {
+        const t = e.nativeEvent.touches;
+        if (t.length >= 2) {
+          isPinching.current = true;
+          isDragging.current = true;
+          const dx   = t[0].pageX - t[1].pageX;
+          const dy   = t[0].pageY - t[1].pageY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (lastDist.current === 0) {
+            // Second finger just joined — record baseline
+            lastDist.current = dist;
+          } else {
+            const ratio   = dist / lastDist.current;
+            // Pinching out (ratio > 1) zooms back into sky canvas
+            const newZoom = Math.min(2.0, Math.max(0.15, canvasZoomValueRef.current * ratio));
+            canvasZoom.setValue(newZoom);
+            canvasZoomValueRef.current = newZoom;
+            lastDist.current = dist;
+          }
+        } else if (!isPinching.current) {
+          isDragging.current = true;
+          const newLon = startLon.current - gs.dx * 0.007;
+          const newLat = Math.max(-1.2, Math.min(1.2, startLat.current + gs.dy * 0.007));
+          rotLonRef.current = newLon;
+          rotLatRef.current = newLat;
+          setRot({ lon: newLon, lat: newLat });
+        }
+      },
+
+      onPanResponderRelease: () => {
+        isPinching.current = false;
+        lastDist.current   = 0;
+        isDragging.current = false;
+      },
+    })
+  ).current;
+
+  const cx = W / 2;
+  const cy = H * 0.47;
+  const { lon: rotLon, lat: rotLat } = rot;
+
+  // Project each room cloud onto the sphere (+ per-cloud float offset → lon shift)
+  const projected = rooms.slice(0, 8).map(room => {
+    const { lon, lat } = roomGlobePos(room.code);
+    const dLon  = lon + cloudLonOffset(room.id) - rotLon;
+    const x     = GLOBE_R * Math.sin(dLon) * Math.cos(lat);
+    const y     = GLOBE_R * (Math.sin(lat) * Math.cos(rotLat) - Math.cos(dLon) * Math.cos(lat) * Math.sin(rotLat));
+    const depth = Math.cos(dLon) * Math.cos(lat) * Math.cos(rotLat) + Math.sin(lat) * Math.sin(rotLat);
+    return { room, x, y, depth };
+  }).sort((a, b) => a.depth - b.depth);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#0D1B2A" }} {...globePan.panHandlers}>
+
+      {/* Stars */}
+      {GLOBE_STARS.map((s, i) => (
+        <View key={i} pointerEvents="none" style={{
+          position: "absolute", left: s.x, top: s.y,
+          width: s.r * 2, height: s.r * 2, borderRadius: s.r,
+          backgroundColor: "white", opacity: s.o,
+        }} />
+      ))}
+
+      {/* Atmosphere glow */}
+      <View pointerEvents="none" style={{
+        position: "absolute",
+        left: cx - GLOBE_R * 1.18, top: cy - GLOBE_R * 1.18,
+        width: GLOBE_R * 2.36, height: GLOBE_R * 2.36,
+        borderRadius: GLOBE_R * 1.18,
+        backgroundColor: "#4A90D9", opacity: 0.18,
+      }} />
+
+      {/* Globe sphere */}
+      <View pointerEvents="none" style={{
+        position: "absolute",
+        left: cx - GLOBE_R, top: cy - GLOBE_R,
+        width: GLOBE_R * 2, height: GLOBE_R * 2,
+        borderRadius: GLOBE_R,
+        backgroundColor: "#1E4DA0",
+        overflow: "hidden",
+      }}>
+        {/* Ocean mid-tone */}
+        <View style={{
+          position: "absolute",
+          width: GLOBE_R * 1.4, height: GLOBE_R * 1.4, borderRadius: GLOBE_R * 0.7,
+          backgroundColor: "#4A90D9", opacity: 0.35,
+          top: GLOBE_R * 0.1, left: GLOBE_R * 0.15,
+        }} />
+        {/* Specular highlight */}
+        <View style={{
+          position: "absolute",
+          width: GLOBE_R * 0.55, height: GLOBE_R * 0.38, borderRadius: GLOBE_R * 0.28,
+          backgroundColor: "white", opacity: 0.07,
+          top: GLOBE_R * 0.18, left: GLOBE_R * 0.28,
+        }} />
+      </View>
+
+      {/* Projected room clouds */}
+      {projected.map(({ room, x, y, depth }) => {
+        if (depth < -0.05) return null;
+        const cloudW = BASE_CLOUD_W * 0.52 * Math.max(0.35, depth);
+        const alpha  = depth < 0.15 ? Math.max(0, (depth + 0.05) / 0.2) : 1;
+        return (
+          <View
+            key={room.id}
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: cx + x - cloudW / 2,
+              top:  cy + y - (cloudW * 185 / 240) / 2,
+              opacity: alpha,
+            }}
+          >
+            <SkyCloud
+              name={nicknames[room.code] ?? room.code}
+              width={cloudW}
+              unread={unreadRooms.has(room.code)}
+              variant={roomVariant(room.code)}
+            />
+          </View>
+        );
+      })}
+
+      {/* "pinch out to return" hint */}
+      <View pointerEvents="none" style={{
+        position: "absolute", bottom: 108, left: 0, right: 0, alignItems: "center",
+      }}>
+        <View style={{
+          backgroundColor: "rgba(255,255,255,0.10)",
+          paddingHorizontal: 18, paddingVertical: 9, borderRadius: 22,
+        }}>
+          <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "500" }}>
+            pinch out to return
+          </Text>
+        </View>
+      </View>
+    </View>
   );
 }
