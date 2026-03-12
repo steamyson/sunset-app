@@ -7,13 +7,14 @@ import {
   Share,
   Platform,
   Alert,
+  Modal,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, type Message } from "../../utils/messages";
+import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, type Message } from "../../utils/messages";
 import { getAlias } from "../../utils/aliases";
 import { getRoomNickname } from "../../utils/nicknames";
 import { getNicknames } from "../../utils/identity";
@@ -25,8 +26,19 @@ import { setLastSeen } from "../../utils/lastSeen";
 import { ReactionBar } from "../../components/ReactionBar";
 import { colors, cloudShape } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
+import { CameraView, useCameraPermissions, type FlashMode } from "expo-camera";
+import { CropView } from "../../components/CropView";
+import { FilterView } from "../../components/FilterView";
+import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../../utils/filters";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 const SCREEN_W = Dimensions.get("window").width;
+const SCREEN_H = Dimensions.get("window").height;
+
+const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
+const FLASH_ICON: Record<string, "flash-off" | "flash"> = { off: "flash-off", on: "flash", auto: "flash" };
+const FLASH_LABEL: Record<string, string> = { off: "Off", on: "On", auto: "Auto" };
 
 export default function RoomThread() {
   const { code } = useLocalSearchParams<{ code: string }>();
@@ -37,6 +49,63 @@ export default function RoomThread() {
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+
+  // ─── In-room camera ───────────────────────────────────────────────────────
+  const [showCamera, setShowCamera]       = useState(false);
+  const [rawPhoto,   setRawPhoto]         = useState<string | null>(null);
+  const [photo,      setPhoto]            = useState<string | null>(null);
+  const [showCrop,   setShowCrop]         = useState(false);
+  const [showFilter, setShowFilter]       = useState(false);
+  const [activeFilter, setActiveFilter]   = useState<FilterName>("original");
+  const [activeAdj, setActiveAdj]         = useState<Adjustments>({ ...DEFAULT_ADJUSTMENTS });
+  const [flash, setFlash]                 = useState<FlashMode>("off");
+  const [sending, setSending]             = useState(false);
+  const [sendError, setSendError]         = useState<string | null>(null);
+  const [permission, requestPermission]   = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+
+  function resetCamera() {
+    setRawPhoto(null); setPhoto(null);
+    setShowCrop(false); setShowFilter(false);
+    setActiveFilter("original"); setActiveAdj({ ...DEFAULT_ADJUSTMENTS });
+    setSendError(null);
+  }
+
+  function closeCamera() { resetCamera(); setShowCamera(false); }
+
+  function cycleFlash() {
+    setFlash((prev) => FLASH_CYCLE[(FLASH_CYCLE.indexOf(prev) + 1) % FLASH_CYCLE.length]);
+  }
+
+  async function takePicture() {
+    const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
+    if (result?.uri) { setRawPhoto(result.uri); setShowCrop(true); }
+  }
+
+  async function handleSend() {
+    if (!photo) return;
+    setSending(true); setSendError(null);
+    try {
+      const deviceId = await getDeviceId();
+      await sendPhoto({ uri: photo, roomCodes: [code], deviceId, filter: activeFilter, adjustments: activeAdj });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      closeCamera();
+      // Refresh messages so the new photo appears immediately
+      const [msgs, reported] = await Promise.all([fetchRoomMessagesByCode(code), getReportedMessageIds()]);
+      const filtered = msgs.filter((m) => !reported.has(m.id));
+      const uniqueIds = [...new Set(filtered.map((m) => m.sender_device_id))];
+      const [names, rxns] = await Promise.all([
+        getNicknames(uniqueIds),
+        fetchReactions(filtered.map((m) => m.id)),
+      ]);
+      setMessages(filtered);
+      setSenderNames(names);
+      setReactions(rxns);
+    } catch (e: any) {
+      setSendError(e.message ?? "Failed to send.");
+      setSending(false);
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -159,7 +228,7 @@ export default function RoomThread() {
       {loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : messages.length === 0 ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
           <Text style={{ fontSize: 52 }}>🌄</Text>
           <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
             No sunsets yet
@@ -190,7 +259,138 @@ export default function RoomThread() {
           </View>
         </ScrollView>
       )}
+
+      {/* Floating camera button — same style as the tab bar camera button */}
+      <TouchableOpacity
+        onPress={() => {
+          if (!permission?.granted) { requestPermission(); return; }
+          resetCamera();
+          setShowCamera(true);
+        }}
+        activeOpacity={0.85}
+        style={{
+          position: "absolute",
+          bottom: 28,
+          alignSelf: "center",
+          left: "50%",
+          marginLeft: -32,
+          width: 64, height: 64, borderRadius: 32,
+          backgroundColor: colors.ember,
+          alignItems: "center", justifyContent: "center",
+          shadowColor: colors.ember,
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: 0.45, shadowRadius: 10, elevation: 10,
+        }}
+      >
+        <Ionicons name="camera" size={28} color="white" />
+      </TouchableOpacity>
     </SafeAreaView>
+
+    {/* ─── Camera modal ──────────────────────────────────────────────────── */}
+    <Modal visible={showCamera} animationType="slide" statusBarTranslucent>
+
+      {showCrop && rawPhoto ? (
+        <CropView
+          uri={rawPhoto}
+          onDone={(croppedUri) => { setPhoto(croppedUri); setShowCrop(false); setShowFilter(true); }}
+          onSkip={() => { setPhoto(rawPhoto); setShowCrop(false); setShowFilter(true); }}
+          onBack={() => { setRawPhoto(null); setShowCrop(false); }}
+        />
+      ) : showFilter && photo ? (
+        <FilterView
+          uri={photo}
+          onDone={(filter, adjustments) => { setActiveFilter(filter); setActiveAdj(adjustments); setShowFilter(false); }}
+          onBack={() => { setPhoto(null); setShowFilter(false); setShowCrop(true); }}
+        />
+      ) : photo ? (
+        <View style={{ flex: 1, backgroundColor: "black" }}>
+          <FilteredImage uri={photo} filter={activeFilter} adjustments={activeAdj} width={SCREEN_W} height={SCREEN_H} />
+
+          {sendError && (
+            <View style={{
+              position: "absolute", top: 60, left: 24, right: 24,
+              backgroundColor: colors.magenta, padding: 12, borderRadius: 12,
+            }}>
+              <Text style={{ color: "white", textAlign: "center", fontWeight: "600" }}>{sendError}</Text>
+            </View>
+          )}
+
+          <View style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            flexDirection: "row", gap: 14, padding: 28,
+            paddingBottom: Platform.OS === "ios" ? 48 : 32,
+          }}>
+            <TouchableOpacity
+              onPress={resetCamera}
+              activeOpacity={0.85}
+              style={{
+                flex: 1, backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 18,
+                borderRadius: 18, alignItems: "center",
+                borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+              }}
+            >
+              <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Retake</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleSend}
+              disabled={sending}
+              activeOpacity={0.85}
+              style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
+            >
+              {sending
+                ? <ActivityIndicator color="white" />
+                : <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <View style={{ flex: 1, backgroundColor: "black" }}>
+          <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back" flash={flash} />
+
+          {/* Close */}
+          <TouchableOpacity
+            onPress={closeCamera}
+            style={{
+              position: "absolute", top: 56, left: 24,
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: "rgba(0,0,0,0.45)",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 18, fontWeight: "600" }}>✕</Text>
+          </TouchableOpacity>
+
+          {/* Flash toggle */}
+          <TouchableOpacity
+            onPress={cycleFlash}
+            style={{
+              position: "absolute", top: 56, right: 24,
+              height: 44, paddingHorizontal: 14, borderRadius: 22,
+              backgroundColor: flash === "off" ? "rgba(0,0,0,0.45)" : "rgba(255,200,0,0.85)",
+              flexDirection: "row", alignItems: "center", gap: 6,
+            }}
+          >
+            <Ionicons name={FLASH_ICON[flash]} size={18} color="white" />
+            <Text style={{ color: "white", fontWeight: "700", fontSize: 13 }}>{FLASH_LABEL[flash]}</Text>
+          </TouchableOpacity>
+
+          {/* Shutter */}
+          <View style={{ position: "absolute", bottom: 56, alignSelf: "center" }}>
+            <TouchableOpacity
+              onPress={takePicture}
+              activeOpacity={0.9}
+              style={{
+                width: 80, height: 80, borderRadius: 40,
+                backgroundColor: "white", borderWidth: 5, borderColor: colors.ember,
+              }}
+            />
+          </View>
+        </View>
+      )}
+    </Modal>
+
     </ParticleTrail>
   );
 }
