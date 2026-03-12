@@ -43,7 +43,6 @@ import {
 } from "../../utils/notifications";
 import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
-import { ParticleTrail } from "../../components/ParticleTrail";
 
 import type { Room } from "../../utils/supabase";
 
@@ -293,7 +292,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <View style={{ flex: 1, backgroundColor: colors.sky }}>
 
       {/* ── Sunset glow rays ── */}
       <Animated.View pointerEvents="none" style={{
@@ -743,6 +742,6 @@ export default function ProfileScreen() {
       </Modal>
 
       </SafeAreaView>
-    </ParticleTrail>
+    </View>
   );
 }

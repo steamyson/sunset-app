@@ -30,6 +30,7 @@ import { reverseGeocode } from "../../utils/geocoding";
 import { ReactionBar } from "../../components/ReactionBar";
 import { FilteredImage } from "../../components/FilteredImage";
 import { colors, cloudShape } from "../../utils/theme";
+import { ParticleTrail } from "../../components/ParticleTrail";
 
 const SCREEN_W = W;
 
@@ -129,7 +130,7 @@ export default function FeedScreen() {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+    <ParticleTrail style={{ backgroundColor: colors.sky }}>
 
       {/* ── Sunset glow rays ── */}
       <Animated.View pointerEvents="none" style={{
@@ -227,7 +228,7 @@ export default function FeedScreen() {
         )}
       </ScrollView>
       </SafeAreaView>
-    </View>
+    </ParticleTrail>
   );
 }
 

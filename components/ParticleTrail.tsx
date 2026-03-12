@@ -1,5 +1,5 @@
+import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { View, Animated, PanResponder } from "react-native";
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { ViewStyle } from "react-native";
 
 const SPARK_COLORS = ["#FFE135", "#F5A623", "#E8642A", "#FFF59D", "#FFCC02", "#FFB347"];
@@ -31,7 +31,7 @@ const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
         const opacity = new Animated.Value(1);
         const scale   = new Animated.Value(1);
         const color   = SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)];
-        const size    = 8 + Math.pow(Math.random(), 1.8) * 52;
+        const size    = 4 + Math.pow(Math.random(), 1.8) * 26;
         const scatter = size * 0.4;
         const px      = x + (Math.random() - 0.5) * scatter;
         const py      = y + (Math.random() - 0.5) * scatter;
