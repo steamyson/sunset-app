@@ -31,6 +31,7 @@ import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
 import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
+import { ParticleTrail } from "../../components/ParticleTrail";
 
 const SCREEN_W = Dimensions.get("window").width;
 
@@ -397,7 +398,7 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <ParticleTrail>
       {/* Map fills everything */}
       {loading ? (
         <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
@@ -439,6 +440,6 @@ export default function MapScreen() {
           </Text>
         </View>
       )}
-    </View>
+    </ParticleTrail>
   );
 }

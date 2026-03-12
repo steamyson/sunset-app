@@ -24,6 +24,7 @@ import { FilteredImage } from "../../components/FilteredImage";
 import { setLastSeen } from "../../utils/lastSeen";
 import { ReactionBar } from "../../components/ReactionBar";
 import { colors, cloudShape } from "../../utils/theme";
+import { ParticleTrail } from "../../components/ParticleTrail";
 
 const SCREEN_W = Dimensions.get("window").width;
 
@@ -113,7 +114,8 @@ export default function RoomThread() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky }}>
+    <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <SafeAreaView style={{ flex: 1 }}>
       {/* Header */}
       <View style={{
         flexDirection: "row", alignItems: "center",
@@ -189,6 +191,7 @@ export default function RoomThread() {
         </ScrollView>
       )}
     </SafeAreaView>
+    </ParticleTrail>
   );
 }
 

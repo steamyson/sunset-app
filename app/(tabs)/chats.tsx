@@ -26,6 +26,7 @@ import { getAllLastSeen } from "../../utils/lastSeen";
 import { getItem, setItem } from "../../utils/storage";
 import { colors } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
+import { ParticleTrail } from "../../components/ParticleTrail";
 import type { Room } from "../../utils/supabase";
 
 // ─── Cloud layout defaults ────────────────────────────────────────────────────
@@ -568,7 +569,8 @@ export default function ChatsScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <View ref={rootViewRef} style={{ flex: 1, backgroundColor: colors.sky }}>
+    <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <View ref={rootViewRef} style={{ flex: 1 }}>
 
       {/* Sunset glow rays */}
       <Animated.View pointerEvents="none" style={{
@@ -917,5 +919,6 @@ export default function ChatsScreen() {
         </View>
       </Modal>
     </View>
+    </ParticleTrail>
   );
 }
