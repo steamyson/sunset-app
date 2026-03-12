@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Dimensions,
+  PanResponder,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,19 +19,19 @@ import { router, useFocusEffect } from "expo-router";
 const { width: W, height: H } = Dimensions.get("window");
 
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
 import { fetchMyRooms, leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
+import { getItem, setItem } from "../../utils/storage";
 import { colors } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
 import type { Room } from "../../utils/supabase";
 
-// ─── Cloud layout config ──────────────────────────────────────────────────────
+// ─── Cloud layout defaults ────────────────────────────────────────────────────
 const BASE_CLOUD_W = W * 0.54;
 
-const CLOUD_POSITIONS = [
+const CLOUD_SLOTS = [
   { left: W * 0.02,  top: H * 0.03, scale: 1.15 },
   { left: W * 0.42,  top: H * 0.09, scale: 0.80 },
   { left: W * 0.04,  top: H * 0.26, scale: 1.00 },
@@ -42,11 +43,18 @@ const CLOUD_POSITIONS = [
 ];
 
 const DECORATIVE = [
-  { x: W * 0.64,  y: H * 0.13, width: W * 0.28, opacity: 0.15 },
-  { x: -W * 0.03, y: H * 0.40, width: W * 0.22, opacity: 0.12 },
-  { x: W * 0.72,  y: H * 0.57, width: W * 0.25, opacity: 0.18 },
-  { x: W * 0.18,  y: H * 0.78, width: W * 0.32, opacity: 0.13 },
+  { x: W * 0.64,  y: H * 0.13, width: W * 0.28, opacity: 0.15, variant: 1, driftX: 18, driftY:  7, duration: 11000 },
+  { x: -W * 0.03, y: H * 0.40, width: W * 0.22, opacity: 0.12, variant: 5, driftX: 14, driftY: 10, duration: 14000 }, // bottom fluffy
+  { x: W * 0.72,  y: H * 0.57, width: W * 0.25, opacity: 0.18, variant: 4, driftX: 22, driftY:  6, duration:  9000 }, // bottom fluffy
+  { x: W * 0.18,  y: H * 0.78, width: W * 0.32, opacity: 0.13, variant: 2, driftX: 16, driftY:  9, duration: 12500 },
 ];
+
+const STORAGE_KEY = "cloud_pos_v1";
+
+// Stable shape variant per room — derived from room code so it never changes
+function roomVariant(code: string): number {
+  return code.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 8;
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
@@ -82,25 +90,166 @@ export default function ChatsScreen() {
   const [addError, setAddError] = useState<string | null>(null);
   const [newlyCreatedCode, setNewlyCreatedCode] = useState<string | null>(null);
 
-  // Multi-select
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
-  const [leavingMulti, setLeavingMulti] = useState(false);
-
   // Rename modal
   const [renaming, setRenaming] = useState<Room | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
+  // Options sheet (shown on long-hold-in-place)
+  const [optionsRoom, setOptionsRoom] = useState<Room | null>(null);
+  const [leavingRoom, setLeavingRoom] = useState(false);
+
+  // Lifted cloud (visual drag state)
+  const [liftedRoomId, setLiftedRoomId] = useState<string | null>(null);
+
   // Zoom-into-cloud transition
   const rootViewRef = useRef<View>(null);
-  const cloudRefs = useRef<(View | null)[]>([]);
+  const cloudRefs = useRef<Record<string, View | null>>({});
   const pendingRoomCode = useRef("");
   const zoomScaleAnim = useRef(new Animated.Value(1)).current;
   const [zoomOrigin, setZoomOrigin] = useState<{
     x: number; y: number; w: number; h: number; cx: number; cy: number;
   } | null>(null);
 
-  // Start zoom animation whenever origin is set
+  // Per-cloud drag state (keyed by room.id)
+  const savedPositions = useRef<Record<string, { x: number; y: number }>>({});
+  const cloudAnims    = useRef<Record<string, Animated.ValueXY>>({});
+  const cloudScales   = useRef<Record<string, Animated.Value>>({});
+  const panResponders = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+
+  // Stable callbacks so PanResponder closures never go stale
+  const onTapRef     = useRef<(room: Room, slotIndex: number) => void>(() => {});
+  const onOptionsRef = useRef<(room: Room) => void>(() => {});
+  // Updated every render
+  onTapRef.current     = (room, slotIndex) => handleCloudPress(room, slotIndex);
+  onOptionsRef.current = (room) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setOptionsRoom(room); };
+
+  // ─── Persist / restore cloud positions ──────────────────────────────────────
+  async function loadSavedPositions() {
+    try {
+      const raw = await getItem(STORAGE_KEY);
+      if (raw) savedPositions.current = JSON.parse(raw);
+    } catch {}
+  }
+
+  async function saveCloudPosition(code: string, x: number, y: number) {
+    savedPositions.current[code] = { x, y };
+    await setItem(STORAGE_KEY, JSON.stringify(savedPositions.current));
+  }
+
+  // ─── Per-cloud anim / pan responder ─────────────────────────────────────────
+  function getOrInitAnim(room: Room, slotIndex: number): Animated.ValueXY {
+    if (!cloudAnims.current[room.id]) {
+      const saved = savedPositions.current[room.code];
+      const slot  = CLOUD_SLOTS[slotIndex % CLOUD_SLOTS.length];
+      cloudAnims.current[room.id] = new Animated.ValueXY({
+        x: saved?.x ?? slot.left,
+        y: saved?.y ?? slot.top,
+      });
+    }
+    return cloudAnims.current[room.id];
+  }
+
+  function getOrInitScale(room: Room): Animated.Value {
+    if (!cloudScales.current[room.id]) {
+      cloudScales.current[room.id] = new Animated.Value(1);
+    }
+    return cloudScales.current[room.id];
+  }
+
+  function getOrCreatePanResponder(room: Room, slotIndex: number) {
+    if (panResponders.current[room.id]) return panResponders.current[room.id];
+
+    const anim      = getOrInitAnim(room, slotIndex);
+    const scaleAnim = getOrInitScale(room);
+    const cw        = BASE_CLOUD_W * CLOUD_SLOTS[slotIndex % CLOUD_SLOTS.length].scale;
+    const ch        = cw * (140 / 240); // matches VB_H/VB_W in SkyCloud
+
+    let pressTimer: ReturnType<typeof setTimeout> | null = null;
+    let dragging  = false;
+    let longFired = false;
+    let startX    = 0;
+    let startY    = 0;
+
+    const pr = PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+
+      onPanResponderGrant: () => {
+        dragging  = false;
+        longFired = false;
+        startX = (anim.x as any)._value;
+        startY = (anim.y as any)._value;
+        anim.stopAnimation();
+
+        pressTimer = setTimeout(() => {
+          if (!dragging) {
+            longFired = true;
+            onOptionsRef.current(room);
+          }
+        }, 500);
+      },
+
+      onPanResponderMove: (_, gs) => {
+        const dist = Math.sqrt(gs.dx * gs.dx + gs.dy * gs.dy);
+        if (dist > 8) {
+          if (!dragging) {
+            dragging = true;
+            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+            setLiftedRoomId(room.id);
+            Animated.spring(scaleAnim, {
+              toValue: 1.1, useNativeDriver: true, tension: 200, friction: 8,
+            }).start();
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }
+          anim.setValue({ x: startX + gs.dx, y: startY + gs.dy });
+        }
+      },
+
+      onPanResponderRelease: (_, gs) => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+
+        if (dragging) {
+          setLiftedRoomId(null);
+          Animated.spring(scaleAnim, {
+            toValue: 1, useNativeDriver: true, tension: 200, friction: 8,
+          }).start();
+          // Clamp so cloud stays mostly on screen
+          const rawX = startX + gs.dx;
+          const rawY = startY + gs.dy;
+          const finalX = Math.max(-cw * 0.25, Math.min(W - cw * 0.75, rawX));
+          const finalY = Math.max(50, Math.min(H - ch - 50, rawY));
+          if (finalX !== rawX || finalY !== rawY) {
+            Animated.spring(anim, {
+              toValue: { x: finalX, y: finalY },
+              useNativeDriver: true, tension: 150, friction: 8,
+            }).start();
+          }
+          saveCloudPosition(room.code, finalX, finalY);
+        } else if (!longFired) {
+          // Tap — pulse then zoom
+          Animated.sequence([
+            Animated.timing(scaleAnim, { toValue: 1.08, duration: 90, useNativeDriver: true }),
+            Animated.timing(scaleAnim, { toValue: 1,    duration: 90, useNativeDriver: true }),
+          ]).start();
+          onTapRef.current(room, slotIndex);
+        }
+      },
+
+      onPanResponderTerminate: () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        dragging = false;
+        setLiftedRoomId(null);
+        Animated.spring(scaleAnim, {
+          toValue: 1, useNativeDriver: true, tension: 200, friction: 8,
+        }).start();
+      },
+    });
+
+    panResponders.current[room.id] = pr;
+    return pr;
+  }
+
+  // ─── Zoom animation ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!zoomOrigin) return;
     const { cx, cy, w, h } = zoomOrigin;
@@ -123,13 +272,14 @@ export default function ChatsScreen() {
     });
   }, [zoomOrigin]);
 
-  // Data loading
+  // ─── Data loading ────────────────────────────────────────────────────────────
   async function load() {
     try {
       const [roomList, nameMap, lastSeenMap] = await Promise.all([
         fetchMyRooms(),
         getAllNicknames(),
         getAllLastSeen(),
+        loadSavedPositions(),
       ]);
       setRooms(roomList);
       setNicknames(nameMap);
@@ -150,7 +300,7 @@ export default function ChatsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, []));
 
-  // Room creation / joining
+  // ─── Room creation / joining ─────────────────────────────────────────────────
   async function handleJoinRoom() {
     if (joinCode.trim().length < 6) { setAddError("Enter a 6-character room code."); return; }
     setAddError(null);
@@ -191,10 +341,9 @@ export default function ChatsScreen() {
     await Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${code}` });
   }
 
-  // Cloud interaction
-  function handleCloudPress(room: Room, index: number) {
-    if (multiSelectMode) { toggleMultiSelect(room.code); return; }
-    const cloudRef = cloudRefs.current[index];
+  // ─── Cloud tap (zoom) ────────────────────────────────────────────────────────
+  function handleCloudPress(room: Room, slotIndex: number) {
+    const cloudRef = cloudRefs.current[room.id];
     if (!cloudRef || !rootViewRef.current) {
       router.push(`/room/${room.code}`);
       return;
@@ -209,38 +358,15 @@ export default function ChatsScreen() {
     });
   }
 
-  function handleLongPress(room: Room) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (multiSelectMode) {
-      toggleMultiSelect(room.code);
-    } else {
-      setMultiSelectMode(true);
-      setMultiSelected(new Set([room.code]));
-    }
-  }
-
-  function toggleMultiSelect(code: string) {
-    setMultiSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  }
-
-  function exitMultiSelect() {
-    setMultiSelectMode(false);
-    setMultiSelected(new Set());
-  }
-
-  async function handleLeaveSelected() {
-    setLeavingMulti(true);
+  // ─── Options sheet actions ───────────────────────────────────────────────────
+  async function handleLeaveRoom(room: Room) {
+    setLeavingRoom(true);
     try {
-      for (const code of multiSelected) await leaveRoom(code);
-      setRooms((prev) => prev.filter((r) => !multiSelected.has(r.code)));
-      exitMultiSelect();
+      await leaveRoom(room.code);
+      setRooms((prev) => prev.filter((r) => r.id !== room.id));
+      setOptionsRoom(null);
     } finally {
-      setLeavingMulti(false);
+      setLeavingRoom(false);
     }
   }
 
@@ -251,7 +377,7 @@ export default function ChatsScreen() {
     setRenaming(null);
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
     <View ref={rootViewRef} style={{ flex: 1, backgroundColor: colors.sky }}>
 
@@ -339,36 +465,54 @@ export default function ChatsScreen() {
           <View style={{ flex: 1 }}>
             {/* Decorative background clouds */}
             {DECORATIVE.map((d, i) => (
-              <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity} />
+              <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity}
+                variant={d.variant} driftX={d.driftX} driftY={d.driftY} duration={d.duration} />
             ))}
 
-            {/* Room clouds */}
+            {/* Room clouds — freely draggable */}
             {rooms.slice(0, 8).map((room, i) => {
-              const cfg = CLOUD_POSITIONS[i];
-              const cw = BASE_CLOUD_W * cfg.scale;
+              const slot  = CLOUD_SLOTS[i % CLOUD_SLOTS.length];
+              const cw    = BASE_CLOUD_W * slot.scale;
+              const anim  = getOrInitAnim(room, i);
+              const scaleAnim = getOrInitScale(room);
+              const pr    = getOrCreatePanResponder(room, i);
+
               return (
-                <View
+                <Animated.View
                   key={room.id}
-                  style={{ position: "absolute", left: cfg.left, top: cfg.top }}
+                  style={{
+                    position: "absolute",
+                    transform: [
+                      { translateX: anim.x },
+                      { translateY: anim.y },
+                      { scale: scaleAnim },
+                    ],
+                    // Lifted shadow
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
+                    shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
+                    shadowRadius:  liftedRoomId === room.id ? 16 : 4,
+                    elevation:     liftedRoomId === room.id ? 12 : 2,
+                    zIndex:        liftedRoomId === room.id ? 20 : 1,
+                  }}
+                  {...pr.panHandlers}
                 >
                   <SkyCloud
-                    ref={(r) => { cloudRefs.current[i] = r; }}
+                    ref={(r) => { cloudRefs.current[room.id] = r; }}
                     name={nicknames[room.code] ?? room.code}
                     width={cw}
                     unread={unreadRooms.has(room.code)}
-                    selected={multiSelected.has(room.code)}
-                    multiSelect={multiSelectMode}
-                    onPress={() => handleCloudPress(room, i)}
-                    onLongPress={() => handleLongPress(room)}
+                    lifted={liftedRoomId === room.id}
+                    variant={roomVariant(room.code)}
                   />
-                </View>
+                </Animated.View>
               );
             })}
           </View>
         )}
       </SafeAreaView>
 
-      {/* Zoom overlay — expands from cloud center to fill screen */}
+      {/* Zoom overlay */}
       {zoomOrigin && (
         <Animated.View
           pointerEvents="none"
@@ -386,52 +530,70 @@ export default function ChatsScreen() {
         />
       )}
 
-      {/* Multi-select action bar */}
-      {multiSelectMode && (
-        <View style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          backgroundColor: colors.cream,
-          borderTopLeftRadius: 24, borderTopRightRadius: 24,
-          padding: 20, paddingBottom: 36,
-          flexDirection: "row", alignItems: "center", gap: 12,
-          shadowColor: "#000", shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.08, shadowRadius: 12, elevation: 10,
-          zIndex: 40,
-        }}>
-          <TouchableOpacity
-            onPress={exitMultiSelect}
-            style={{ paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, borderColor: colors.mist }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: "700", color: colors.charcoal }}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              if (multiSelected.size === 0) return;
-              Alert.alert(
-                `Leave ${multiSelected.size} room${multiSelected.size === 1 ? "" : "s"}?`,
-                "You can rejoin any room anytime with its code.",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Leave", style: "destructive", onPress: handleLeaveSelected },
-                ]
-              );
-            }}
-            disabled={multiSelected.size === 0 || leavingMulti}
-            style={{
-              flex: 1,
-              backgroundColor: multiSelected.size === 0 ? colors.mist : colors.magenta,
-              borderRadius: 14, paddingVertical: 14, alignItems: "center",
-            }}
-          >
-            {leavingMulti
-              ? <ActivityIndicator color="white" />
-              : <Text style={{ fontSize: 15, fontWeight: "800", color: "white" }}>
-                  Leave {multiSelected.size > 0 ? `${multiSelected.size} ` : ""}Room{multiSelected.size === 1 ? "" : "s"}
-                </Text>
-            }
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Options sheet (long hold in place) */}
+      <Modal
+        visible={optionsRoom !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setOptionsRoom(null)}
+      >
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.35)", justifyContent: "flex-end" }}
+          activeOpacity={1}
+          onPress={() => setOptionsRoom(null)}
+        >
+          <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
+            <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 4 }}>
+              {optionsRoom ? (nicknames[optionsRoom.code] ?? optionsRoom.code) : ""}
+            </Text>
+            <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 2, marginBottom: 24 }}>
+              {optionsRoom?.code}
+            </Text>
+
+            <TouchableOpacity
+              onPress={() => {
+                if (!optionsRoom) return;
+                setOptionsRoom(null);
+                setTimeout(() => {
+                  setRenameInput(nicknames[optionsRoom.code] ?? "");
+                  setRenaming(optionsRoom);
+                }, 300);
+              }}
+              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+            >
+              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Rename</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => optionsRoom && handleShareCode(optionsRoom.code)}
+              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+            >
+              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Room Code</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                if (!optionsRoom) return;
+                Alert.alert(
+                  "Leave Room?",
+                  "You can rejoin anytime with the room code.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Leave", style: "destructive", onPress: () => handleLeaveRoom(optionsRoom) },
+                  ]
+                );
+              }}
+              disabled={leavingRoom}
+              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16 }}
+            >
+              {leavingRoom
+                ? <ActivityIndicator color={colors.magenta} />
+                : <Text style={{ fontSize: 16, color: colors.magenta, fontWeight: "600" }}>Leave Room</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Add room sheet */}
       <Modal
