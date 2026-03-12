@@ -31,22 +31,26 @@ import type { Room } from "../../utils/supabase";
 // ─── Cloud layout defaults ────────────────────────────────────────────────────
 const BASE_CLOUD_W = W * 0.54;
 
+// Sky canvas spans ~2.2× the screen in each direction — clouds spread across this space
+const SKY_W = W * 2.2;
+const SKY_H = H * 2.2;
+
 const CLOUD_SLOTS = [
-  { left: W * 0.02,  top: H * 0.03, scale: 1.15 },
-  { left: W * 0.42,  top: H * 0.09, scale: 0.80 },
-  { left: W * 0.04,  top: H * 0.26, scale: 1.00 },
-  { left: W * 0.44,  top: H * 0.30, scale: 1.08 },
-  { left: W * 0.02,  top: H * 0.48, scale: 0.88 },
-  { left: W * 0.42,  top: H * 0.52, scale: 1.00 },
-  { left: W * 0.08,  top: H * 0.66, scale: 0.85 },
-  { left: W * 0.46,  top: H * 0.70, scale: 1.05 },
+  { left: SKY_W * 0.04,  top: SKY_H * 0.04,  scale: 1.15 },
+  { left: SKY_W * 0.48,  top: SKY_H * 0.06,  scale: 0.82 },
+  { left: SKY_W * 0.76,  top: SKY_H * 0.14,  scale: 1.00 },
+  { left: SKY_W * 0.14,  top: SKY_H * 0.30,  scale: 1.08 },
+  { left: SKY_W * 0.56,  top: SKY_H * 0.32,  scale: 0.90 },
+  { left: SKY_W * 0.82,  top: SKY_H * 0.45,  scale: 1.00 },
+  { left: SKY_W * 0.24,  top: SKY_H * 0.56,  scale: 0.85 },
+  { left: SKY_W * 0.62,  top: SKY_H * 0.60,  scale: 1.05 },
 ];
 
 const DECORATIVE = [
-  { x: W * 0.64,  y: H * 0.13, width: W * 0.28, opacity: 0.15, variant: 1, driftX: 18, driftY:  7, duration: 11000 },
-  { x: -W * 0.03, y: H * 0.40, width: W * 0.22, opacity: 0.12, variant: 5, driftX: 14, driftY: 10, duration: 14000 }, // bottom fluffy
-  { x: W * 0.72,  y: H * 0.57, width: W * 0.25, opacity: 0.18, variant: 4, driftX: 22, driftY:  6, duration:  9000 }, // bottom fluffy
-  { x: W * 0.18,  y: H * 0.78, width: W * 0.32, opacity: 0.13, variant: 2, driftX: 16, driftY:  9, duration: 12500 },
+  { x: SKY_W * 0.88, y: SKY_H * 0.08,  width: W * 0.28, opacity: 0.15, variant: 1, driftX: 18, driftY:  7, duration: 11000 },
+  { x: SKY_W * 0.02, y: SKY_H * 0.35,  width: W * 0.22, opacity: 0.12, variant: 5, driftX: 14, driftY: 10, duration: 14000 },
+  { x: SKY_W * 0.68, y: SKY_H * 0.52,  width: W * 0.25, opacity: 0.18, variant: 4, driftX: 22, driftY:  6, duration:  9000 },
+  { x: SKY_W * 0.30, y: SKY_H * 0.70,  width: W * 0.32, opacity: 0.13, variant: 2, driftX: 16, driftY:  9, duration: 12500 },
 ];
 
 const STORAGE_KEY = "cloud_pos_v1";
@@ -110,11 +114,181 @@ export default function ChatsScreen() {
     x: number; y: number; w: number; h: number; cx: number; cy: number;
   } | null>(null);
 
+  // ─── Sky canvas zoom + pan ───────────────────────────────────────────────────
+  const canvasZoom      = useRef(new Animated.Value(1)).current;
+  const canvasPan       = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const canvasZoomValue = useRef(1); // JS-side mirror of canvasZoom for pinch math
+  const canvasCenter    = useRef({ x: W / 2, y: H / 2 }); // updated on layout
+  const canvasViewSize  = useRef({ width: W, height: H * 0.75 }); // updated on layout
+
+  // Track zoom value from both spring animations and direct setValue
+  useEffect(() => {
+    const id = canvasZoom.addListener(({ value }) => { canvasZoomValue.current = value; });
+    return () => canvasZoom.removeListener(id);
+  }, []);
+
+  // Fit all clouds into view as large as possible
+  function fitCloudsToView() {
+    const currentRooms = roomsRef.current;
+    if (currentRooms.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let found = false;
+
+    currentRooms.slice(0, 8).forEach((room, i) => {
+      const anim = cloudAnims.current[room.id];
+      if (!anim) return;
+      const si = cloudSlotIndex.current[room.id] ?? i;
+      const cw = BASE_CLOUD_W * CLOUD_SLOTS[si % CLOUD_SLOTS.length].scale;
+      const ch = cw * (185 / 240);
+      const x  = (anim.x as any)._value;
+      const y  = (anim.y as any)._value;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + cw);
+      maxY = Math.max(maxY, y + ch);
+      found = true;
+    });
+
+    if (!found) return;
+
+    const PAD  = 52;
+    const bboxW  = maxX - minX;
+    const bboxH  = maxY - minY;
+    const bboxCX = (minX + maxX) / 2;
+    const bboxCY = (minY + maxY) / 2;
+
+    const { width: vw, height: vh } = canvasViewSize.current;
+    const s = Math.max(0.15, Math.min(2.0, Math.min(
+      (vw - PAD * 2) / bboxW,
+      (vh - PAD * 2) / bboxH,
+    )));
+
+    // With transform [translateX(tx), translateY(ty), scale(s)] where scale is around view center,
+    // a canvas-local point (cx,cy) appears at: tx + (cx - vw/2)*s + vw/2
+    // So to center bboxCX at vw/2: tx = (vw/2 - bboxCX) * s
+    const tx = (vw / 2 - bboxCX) * s;
+    const ty = (vh / 2 - bboxCY) * s;
+
+    canvasPan.flattenOffset();
+    Animated.parallel([
+      Animated.spring(canvasZoom, { toValue: s, useNativeDriver: false, tension: 50, friction: 12 }),
+      Animated.spring(canvasPan,  { toValue: { x: tx, y: ty }, useNativeDriver: false, tension: 50, friction: 12 }),
+    ]).start();
+  }
+
+  // Fit-to-content after each data load (fires on every screen focus via loadCount)
+  const [loadCount, setLoadCount] = useState(0);
+  useEffect(() => {
+    if (loadCount > 0) fitCloudsToView();
+  }, [loadCount]);
+
+  // Sky pan + pinch-zoom responder — fires on empty sky, loses to cloud PRs (they're inner)
+  const skyPanResponder = useRef((() => {
+    let isPinching    = false;
+    let lastPinchDist = 0;
+
+    function pinchDist(touches: any[]): number {
+      const dx = touches[0].pageX - touches[1].pageX;
+      const dy = touches[0].pageY - touches[1].pageY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => false,   // don't compete on tap — clouds win automatically
+      onMoveShouldSetPanResponder:  () => true,    // claim on move for pan + pinch
+      onPanResponderTerminationRequest: () => false,
+
+      onPanResponderGrant: () => {
+        canvasPan.stopAnimation();
+        canvasZoom.stopAnimation();
+        canvasPan.extractOffset();
+        isPinching    = false;
+        lastPinchDist = 0;
+      },
+
+      onPanResponderMove: (e, gs) => {
+        const touches = e.nativeEvent.touches;
+        if (touches.length >= 2) {
+          isPinching = true;
+          const dist = pinchDist(touches);
+          const midX = (touches[0].pageX + touches[1].pageX) / 2;
+          const midY = (touches[0].pageY + touches[1].pageY) / 2;
+
+          if (lastPinchDist > 0) {
+            const ratio   = dist / lastPinchDist;
+            const newZoom = Math.max(0.25, Math.min(3.0, canvasZoomValue.current * ratio));
+            const actual  = newZoom / canvasZoomValue.current; // ratio after clamping
+
+            canvasZoom.setValue(newZoom);
+            canvasZoomValue.current = newZoom;
+
+            // Shift pan so the point under the pinch midpoint stays fixed
+            const { x: vcx, y: vcy } = canvasCenter.current;
+            canvasPan.setValue({
+              x: (canvasPan.x as any)._value + (1 - actual) * (midX - vcx),
+              y: (canvasPan.y as any)._value + (1 - actual) * (midY - vcy),
+            });
+          }
+          lastPinchDist = dist;
+        } else if (!isPinching) {
+          canvasPan.setValue({ x: gs.dx, y: gs.dy });
+        }
+      },
+
+      onPanResponderRelease: () => {
+        canvasPan.flattenOffset();
+        isPinching    = false;
+        lastPinchDist = 0;
+      },
+      onPanResponderTerminate: () => {
+        canvasPan.flattenOffset();
+        isPinching    = false;
+        lastPinchDist = 0;
+      },
+    });
+  })()).current;
+
   // Per-cloud drag state (keyed by room.id)
   const savedPositions = useRef<Record<string, { x: number; y: number }>>({});
   const cloudAnims    = useRef<Record<string, Animated.ValueXY>>({});
   const cloudScales   = useRef<Record<string, Animated.Value>>({});
-  const panResponders = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const panResponders    = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const cloudSlotIndex   = useRef<Record<string, number>>({});  // room.id → slot index
+  const roomsRef         = useRef<Room[]>([]);                  // live rooms list for collision
+
+  // ─── Collision detection ─────────────────────────────────────────────────────
+  function resolveCollisions(
+    roomId: string,
+    x: number, y: number,
+    cw: number, ch: number,
+  ): { x: number; y: number } {
+    const CLOUD_H = ch * 0.62; // only the solid cloud body, not the full SVG height
+    const PAD = 14;
+    let px = x, py = y;
+    // Two passes handle most overlap chains without over-pushing
+    for (let pass = 0; pass < 2; pass++) {
+      for (const other of roomsRef.current) {
+        if (other.id === roomId) continue;
+        const oa = cloudAnims.current[other.id];
+        if (!oa) continue;
+        const si   = cloudSlotIndex.current[other.id] ?? 0;
+        const ocw  = BASE_CLOUD_W * CLOUD_SLOTS[si % CLOUD_SLOTS.length].scale;
+        const och  = (ocw * (185 / 240)) * 0.62;
+        const ox   = (oa.x as any)._value;
+        const oy   = (oa.y as any)._value;
+        const mxc  = px + cw  / 2,  myc = py + CLOUD_H / 2;
+        const oxc  = ox + ocw / 2,  oyc = oy + och     / 2;
+        const ovX  = (cw + ocw) / 2 + PAD - Math.abs(mxc - oxc);
+        const ovY  = (CLOUD_H + och) / 2 + PAD - Math.abs(myc - oyc);
+        if (ovX > 0 && ovY > 0) {
+          if (ovX < ovY) { px += mxc < oxc ? -ovX : ovX; }
+          else            { py += myc < oyc ? -ovY : ovY; }
+        }
+      }
+    }
+    return { x: px, y: py };
+  }
 
   // Stable callbacks so PanResponder closures never go stale
   const onTapRef     = useRef<(room: Room, slotIndex: number) => void>(() => {});
@@ -122,6 +296,7 @@ export default function ChatsScreen() {
   // Updated every render
   onTapRef.current     = (room, slotIndex) => handleCloudPress(room, slotIndex);
   onOptionsRef.current = (room) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setOptionsRoom(room); };
+  roomsRef.current     = rooms; // keep live reference for collision detection
 
   // ─── Persist / restore cloud positions ──────────────────────────────────────
   async function loadSavedPositions() {
@@ -141,10 +316,17 @@ export default function ChatsScreen() {
     if (!cloudAnims.current[room.id]) {
       const saved = savedPositions.current[room.code];
       const slot  = CLOUD_SLOTS[slotIndex % CLOUD_SLOTS.length];
-      cloudAnims.current[room.id] = new Animated.ValueXY({
-        x: saved?.x ?? slot.left,
-        y: saved?.y ?? slot.top,
-      });
+      let initX = saved?.x ?? slot.left;
+      let initY = saved?.y ?? slot.top;
+      // For brand-new clouds (no saved position) find a spot that doesn't overlap
+      if (!saved) {
+        const cw = BASE_CLOUD_W * slot.scale;
+        const ch = cw * (185 / 240);
+        const resolved = resolveCollisions(room.id, initX, initY, cw, ch);
+        initX = resolved.x;
+        initY = resolved.y;
+      }
+      cloudAnims.current[room.id] = new Animated.ValueXY({ x: initX, y: initY });
     }
     return cloudAnims.current[room.id];
   }
@@ -159,10 +341,12 @@ export default function ChatsScreen() {
   function getOrCreatePanResponder(room: Room, slotIndex: number) {
     if (panResponders.current[room.id]) return panResponders.current[room.id];
 
+    cloudSlotIndex.current[room.id] = slotIndex; // record for collision detection
+
     const anim      = getOrInitAnim(room, slotIndex);
     const scaleAnim = getOrInitScale(room);
     const cw        = BASE_CLOUD_W * CLOUD_SLOTS[slotIndex % CLOUD_SLOTS.length].scale;
-    const ch        = cw * (140 / 240); // matches VB_H/VB_W in SkyCloud
+    const ch        = cw * (185 / 240); // matches VB_H/VB_W in SkyCloud
 
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
     let dragging  = false;
@@ -171,8 +355,9 @@ export default function ChatsScreen() {
     let startY    = 0;
 
     const pr = PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder:  () => true,
+      onStartShouldSetPanResponder:     () => true,
+      onMoveShouldSetPanResponder:      () => true,
+      onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: () => {
         dragging  = false;
@@ -213,15 +398,18 @@ export default function ChatsScreen() {
           Animated.spring(scaleAnim, {
             toValue: 1, useNativeDriver: true, tension: 200, friction: 8,
           }).start();
-          // Clamp so cloud stays mostly on screen
+          // Clamp within the sky canvas bounds
           const rawX = startX + gs.dx;
           const rawY = startY + gs.dy;
-          const finalX = Math.max(-cw * 0.25, Math.min(W - cw * 0.75, rawX));
-          const finalY = Math.max(50, Math.min(H - ch - 50, rawY));
-          if (finalX !== rawX || finalY !== rawY) {
+          const clampedX = Math.max(-SKY_W * 0.1, Math.min(SKY_W * 0.95, rawX));
+          const clampedY = Math.max(-SKY_H * 0.05, Math.min(SKY_H * 0.85, rawY));
+          // Push away from overlapping clouds
+          const { x: finalX, y: finalY } = resolveCollisions(room.id, clampedX, clampedY, cw, ch);
+          // Only animate if the position was actually adjusted — avoids magnetic snap feeling
+          if (Math.abs(finalX - rawX) > 1 || Math.abs(finalY - rawY) > 1) {
             Animated.spring(anim, {
               toValue: { x: finalX, y: finalY },
-              useNativeDriver: true, tension: 150, friction: 8,
+              useNativeDriver: true, tension: 120, friction: 10,
             }).start();
           }
           saveCloudPosition(room.code, finalX, finalY);
@@ -291,6 +479,7 @@ export default function ChatsScreen() {
         if (latest && (!seen || latest > seen)) unread.add(room.code);
       }
       setUnreadRooms(unread);
+      setLoadCount((c) => c + 1);
     } catch (e) {
       console.error(e);
     } finally {
@@ -462,7 +651,22 @@ export default function ChatsScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={{ flex: 1 }}>
+          <Animated.View
+            onLayout={(e) => {
+              const { x, y, width, height } = e.nativeEvent.layout;
+              canvasCenter.current = { x: x + width / 2, y: y + height / 2 };
+              canvasViewSize.current = { width, height };
+            }}
+            style={{
+              flex: 1,
+              transform: [
+                { translateX: canvasPan.x },
+                { translateY: canvasPan.y },
+                { scale: canvasZoom },
+              ],
+            }}
+            {...skyPanResponder.panHandlers}
+          >
             {/* Decorative background clouds */}
             {DECORATIVE.map((d, i) => (
               <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity}
@@ -508,7 +712,7 @@ export default function ChatsScreen() {
                 </Animated.View>
               );
             })}
-          </View>
+          </Animated.View>
         )}
       </SafeAreaView>
 
