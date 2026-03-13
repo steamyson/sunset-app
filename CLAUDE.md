@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Cursor Architecture Rules
+
+- All colors must come from utils/theme.ts colors object. Never hardcode hex except cloud fill (warm white: #FFFDF8, lifted: #FFF3E0)
+- Use components/Text.tsx not React Native's Text
+- useNativeDriver: false is required on the sky canvas (chats.tsx) — canvasZoom and canvasPan use non-native driver
+- Cloud height is always width * (185/240) — never hardcode height independently
+- Gesture priority: cloud PanResponders (onStartShouldSetPanResponder: true) always beat sky PanResponder (onMoveShouldSetPanResponder: true)
+- GlobeView lives inside chats.tsx as a local function component, not a separate file
+- TypeScript strict mode is on — run npx tsc --noEmit after every change
+- Never use localStorage or sessionStorage — use utils/storage.ts (SecureStore wrapper)
+- SKY_W = W * 2.2, SKY_H = H * 2.2, BASE_CLOUD_W = W * 0.54, GLOBE_R = Math.min(W, H * 0.65) * 0.40
+- Cloud variant is deterministic: roomVariant(code) = charCode sum % 8 — never randomize
+- Globe position is deterministic: roomGlobePos(code) uses sum * 137.508 — never randomize
+- Do not install new packages without asking first
+- Do not restructure file layout or routing
+
 ## What this app is
 
 Dusk is a React Native (Expo) mobile app centered on the daily sunset. Users create or join ephemeral chat "rooms" tied to the golden hour — photos shared in a room expire after 24h. The home screen shows a live countdown to today's sunset. The chats screen is a sky canvas where room clouds float, are draggable, and can be tapped to enter a chat.

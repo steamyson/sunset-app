@@ -21,6 +21,7 @@
     "@expo-google-fonts/satisfy": "^0.4.1",
     "@expo/metro-runtime": "~55.0.6",
     "@expo/ngrok": "^4.1.0",
+    "@expo/vector-icons": "^15.1.1",
     "@supabase/supabase-js": "^2.99.1",
     "expo": "~55.0.5",
     "expo-background-fetch": "~55.0.9",

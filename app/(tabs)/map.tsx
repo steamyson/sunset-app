@@ -244,7 +244,7 @@ function NativeMap({ messages, myCoords }: {
         toolbarEnabled={false}
         minZoomLevel={0}
         maxZoomLevel={19}
-        onRegionChangeComplete={(r) => {
+        onRegionChangeComplete={(r: { latitudeDelta: number }) => {
           const nowIn = r.latitudeDelta < BADGE_DELTA_THRESHOLD;
           setZoomedIn((prev) => (prev === nowIn ? prev : nowIn));
         }}

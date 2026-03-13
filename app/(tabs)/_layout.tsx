@@ -12,7 +12,7 @@ function TabIcon({ name, focused }: { name: keyof typeof Ionicons.glyphMap; focu
       backgroundColor: focused ? `${colors.ember}22` : "transparent",
     }}>
       <Ionicons
-        name={focused ? name : `${name}-outline` as keyof typeof Ionicons.glyphMap}
+        name={focused ? name : (String(name) + "-outline") as keyof typeof Ionicons.glyphMap}
         size={22}
         color={focused ? colors.ember : colors.ash}
       />

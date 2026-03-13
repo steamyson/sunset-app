@@ -26,12 +26,13 @@ import { colors } from "../utils/theme";
 import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime } from "../utils/sunset";
 
 const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
-const FLASH_ICON: Record<FlashMode, "flash-off" | "flash" | "flash"> = {
+const FLASH_ICON: Record<FlashMode, "flash-off" | "flash"> = {
   off: "flash-off",
   on: "flash",
   auto: "flash",
+  screen: "flash",
 };
-const FLASH_LABEL: Record<FlashMode, string> = { off: "Off", on: "On", auto: "Auto" };
+const FLASH_LABEL: Record<FlashMode, string> = { off: "Off", on: "On", auto: "Auto", screen: "Screen" };
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
