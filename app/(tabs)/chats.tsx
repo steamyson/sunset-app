@@ -17,6 +17,8 @@ import AnimatedReanimated, {
   useSharedValue,
   useAnimatedStyle,
   withDecay,
+  withRepeat,
+  withTiming,
 } from "react-native-reanimated";
 import { Text } from "../../components/Text";
 import { Ionicons } from "@expo/vector-icons";
@@ -1220,6 +1222,7 @@ function GlobeCloudItem({
   lonOffset,
   rotLon,
   rotLat,
+  cloudOrbitLon,
   cx,
   cy,
   nicknames,
@@ -1232,6 +1235,7 @@ function GlobeCloudItem({
   lonOffset: number;
   rotLon: SharedNum;
   rotLat: SharedNum;
+  cloudOrbitLon: SharedNum;
   cx: number;
   cy: number;
   nicknames: Record<string, string>;
@@ -1240,7 +1244,7 @@ function GlobeCloudItem({
 }) {
   const animatedStyle = useAnimatedStyle(() => {
     "worklet";
-    const adjLon = baseLon + rotLon.value + lonOffset;
+    const adjLon = baseLon + rotLon.value + lonOffset + cloudOrbitLon.value;
     const adjLat = Math.max(-0.6, Math.min(0.6, baseLat + rotLat.value));
     const x3 = Math.cos(adjLat) * Math.sin(adjLon);
     const y3 = Math.sin(adjLat);
@@ -1299,6 +1303,7 @@ function GlobeView({
 }) {
   const rotLon = useSharedValue(0);
   const rotLat = useSharedValue(0);
+  const cloudOrbitLon = useSharedValue(0);
   const startLon = useRef(0);
   const startLat = useRef(0);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -1343,35 +1348,81 @@ function GlobeView({
 
   const displayRooms = rooms.slice(0, 8);
 
-  const starsOrbitStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotLon.value * (180 / Math.PI)}deg` }],
+  const orbitAngle0 = useSharedValue(0);
+  const orbitAngle1 = useSharedValue(0);
+  const orbitAngle2 = useSharedValue(0);
+  const orbitAngle3 = useSharedValue(0);
+  const orbitAngles = [orbitAngle0, orbitAngle1, orbitAngle2, orbitAngle3];
+  const orbitDurations = [55000, 72000, 95000, 118000];
+
+  useEffect(() => {
+    orbitAngles.forEach((angle, tier) => {
+      angle.value = withRepeat(
+        withTiming(2 * Math.PI, { duration: orbitDurations[tier] }),
+        -1,
+        false
+      );
+    });
+    cloudOrbitLon.value = withRepeat(
+      withTiming(2 * Math.PI, { duration: 75000 }),
+      -1,
+      false
+    );
+  }, []);
+
+  const orbitStyle0 = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${orbitAngle0.value * (180 / Math.PI)}deg` }],
   }));
+  const orbitStyle1 = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${orbitAngle1.value * (180 / Math.PI)}deg` }],
+  }));
+  const orbitStyle2 = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${orbitAngle2.value * (180 / Math.PI)}deg` }],
+  }));
+  const orbitStyle3 = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${orbitAngle3.value * (180 / Math.PI)}deg` }],
+  }));
+  const orbitStyles = [orbitStyle0, orbitStyle1, orbitStyle2, orbitStyle3];
+
+  const starsByTier = useMemo(() => {
+    const tiers: { tier: number; stars: (typeof GLOBE_STARS[0] & { i: number })[] }[] = Array.from(
+      { length: 4 },
+      (_, t) => ({ tier: t, stars: [] })
+    );
+    GLOBE_STARS.forEach((s, i) => {
+      tiers[i % 4].stars.push({ ...s, i });
+    });
+    return tiers;
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0a0f1e" }}>
-      {/* Background: stars (orbit with rotation) + globe with pan handlers */}
+      {/* Background: stars (grouped by orbit speed) + globe with pan handlers */}
       <View style={StyleSheet.absoluteFill} {...globePan.current.panHandlers}>
-        <AnimatedReanimated.View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, starsOrbitStyle]}
-        >
-          {GLOBE_STARS.map((s, i) => (
-            <View
-              key={i}
-              pointerEvents="none"
-              style={{
-                position: "absolute",
-                left: s.x,
-                top: s.y,
-                width: s.r * 2,
-                height: s.r * 2,
-                borderRadius: s.r,
-                backgroundColor: "white",
-                opacity: s.o,
-              }}
-            />
-          ))}
-        </AnimatedReanimated.View>
+        {starsByTier.map(({ tier, stars }) => (
+          <AnimatedReanimated.View
+            key={tier}
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, orbitStyles[tier]]}
+          >
+            {stars.map((s) => (
+              <View
+                key={s.i}
+                pointerEvents="none"
+                style={{
+                  position: "absolute" as const,
+                  left: s.x,
+                  top: s.y,
+                  width: s.r * 2,
+                  height: s.r * 2,
+                  borderRadius: s.r,
+                  backgroundColor: "white",
+                  opacity: s.o,
+                }}
+              />
+            ))}
+          </AnimatedReanimated.View>
+        ))}
         <View
           pointerEvents="none"
           style={{
@@ -1417,6 +1468,7 @@ function GlobeView({
             lonOffset={cloudLonOffset(room.id)}
             rotLon={rotLon}
             rotLat={rotLat}
+            cloudOrbitLon={cloudOrbitLon}
             cx={cx}
             cy={cy}
             nicknames={nicknames}
