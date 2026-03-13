@@ -48,10 +48,10 @@ const CLOUD_SLOTS = [
 ];
 
 const DECORATIVE = [
-  { x: SKY_W * 0.88, y: SKY_H * 0.08,  width: W * 0.28, opacity: 0.15, variant: 1, driftX: 18, driftY:  7, duration: 11000 },
-  { x: SKY_W * 0.02, y: SKY_H * 0.35,  width: W * 0.22, opacity: 0.12, variant: 5, driftX: 14, driftY: 10, duration: 14000 },
-  { x: SKY_W * 0.68, y: SKY_H * 0.52,  width: W * 0.25, opacity: 0.18, variant: 4, driftX: 22, driftY:  6, duration:  9000 },
-  { x: SKY_W * 0.30, y: SKY_H * 0.70,  width: W * 0.32, opacity: 0.13, variant: 2, driftX: 16, driftY:  9, duration: 12500 },
+  { x: SKY_W * 0.88, y: SKY_H * 0.08, width: W * 0.28, opacity: 0.15, variant: 1, driftY:  7, duration: 55000 },
+  { x: SKY_W * 0.02, y: SKY_H * 0.35, width: W * 0.22, opacity: 0.12, variant: 5, driftY: 10, duration: 70000 },
+  { x: SKY_W * 0.68, y: SKY_H * 0.52, width: W * 0.25, opacity: 0.18, variant: 4, driftY:  6, duration: 45000 },
+  { x: SKY_W * 0.30, y: SKY_H * 0.70, width: W * 0.32, opacity: 0.13, variant: 2, driftY:  9, duration: 62000 },
 ];
 
 const STORAGE_KEY = "cloud_pos_v1";
@@ -230,6 +230,15 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (loadCount > 0) fitCloudsToView();
   }, [loadCount]);
+
+  // Also fit when a room is added — useEffect fires post-render so cloudAnims are already initialized
+  const prevRoomsLen = useRef(0);
+  useEffect(() => {
+    if (rooms.length > prevRoomsLen.current && prevRoomsLen.current > 0) {
+      fitCloudsToView();
+    }
+    prevRoomsLen.current = rooms.length;
+  }, [rooms.length]);
 
   // Sky pan + pinch-zoom responder — fires on empty sky, loses to cloud PRs (they're inner)
   const skyPanResponder = useRef((() => {
@@ -758,7 +767,7 @@ export default function ChatsScreen() {
             {/* Decorative background clouds */}
             {DECORATIVE.map((d, i) => (
               <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity}
-                variant={d.variant} driftX={d.driftX} driftY={d.driftY} duration={d.duration} />
+                variant={d.variant} driftY={d.driftY} duration={d.duration} />
             ))}
 
             {/* Room clouds — freely draggable */}
