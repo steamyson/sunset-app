@@ -8,6 +8,9 @@ import {
   Platform,
   Alert,
   Modal,
+  StyleSheet,
+  Animated,
+  Easing,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,9 +26,11 @@ import { fetchReactions, type ReactionMap, type MessageReactions } from "../../u
 import { reverseGeocode } from "../../utils/geocoding";
 import { FilteredImage } from "../../components/FilteredImage";
 import { setLastSeen } from "../../utils/lastSeen";
+import { getItem, setItem } from "../../utils/storage";
 import { ReactionBar } from "../../components/ReactionBar";
 import { colors, cloudShape } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
+import { DecorativeCloud } from "../../components/SkyCloud";
 import { CameraView, useCameraPermissions, type FlashMode } from "expo-camera";
 import { CropView } from "../../components/CropView";
 import { FilterView } from "../../components/FilterView";
@@ -35,13 +40,50 @@ import * as Haptics from "expo-haptics";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
+const UNREAD_PHOTOS_KEY = "unread_photos_v1";
+
+const styles = StyleSheet.create({
+  roomWrapper: {
+    flex: 1,
+    backgroundColor: "#F8F8FF",
+  },
+  cloudLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  topGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: SCREEN_H * 0.25,
+    backgroundColor: "#DCF0FF",
+    opacity: 0.18,
+  },
+  sunsetTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: SCREEN_H * 0.5,
+    backgroundColor: "#FF6B35",
+  },
+  sunsetBottom: {
+    position: "absolute",
+    top: SCREEN_H * 0.5,
+    left: 0,
+    right: 0,
+    height: SCREEN_H * 0.5,
+    backgroundColor: "#FFD166",
+  },
+});
 
 const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
 const FLASH_ICON: Record<string, "flash-off" | "flash"> = { off: "flash-off", on: "flash", auto: "flash" };
 const FLASH_LABEL: Record<string, string> = { off: "Off", on: "On", auto: "Auto" };
 
 export default function RoomThread() {
-  const { code } = useLocalSearchParams<{ code: string }>();
+  const params = useLocalSearchParams<{ code: string; unread?: string }>();
+  const code = params.code;
   const [messages, setMessages] = useState<Message[]>([]);
   const [nickname, setNickname] = useState<string | null>(null);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
@@ -63,6 +105,50 @@ export default function RoomThread() {
   const [sendError, setSendError]         = useState<string | null>(null);
   const [permission, requestPermission]   = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+  const sunsetAnim = useRef(new Animated.Value(0)).current;
+
+  // Check unread on mount: route param or SecureStore, run sunset flash if unread, then mark read
+  useEffect(() => {
+    let cancelled = false;
+    async function checkAndFlash() {
+      const unreadFromParam = params.unread === "true" || params.unread === "1";
+      if (unreadFromParam) {
+        if (!cancelled) setTimeout(() => runSunsetFlash(() => markRoomRead(code)), 1000);
+        return;
+      }
+      const raw = await getItem(UNREAD_PHOTOS_KEY);
+      const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+      if (map[code] === true && !cancelled) {
+        setTimeout(() => runSunsetFlash(() => markRoomRead(code)), 1000);
+      }
+    }
+    checkAndFlash();
+    return () => { cancelled = true; };
+  }, [code]);
+
+  function runSunsetFlash(onComplete?: () => void) {
+    Animated.sequence([
+      Animated.timing(sunsetAnim, {
+        toValue: 0.35,
+        duration: 400,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(sunsetAnim, {
+        toValue: 0,
+        duration: 600,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => onComplete?.());
+  }
+
+  async function markRoomRead(roomCode: string) {
+    const raw = await getItem(UNREAD_PHOTOS_KEY);
+    const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+    map[roomCode] = false;
+    await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+  }
 
   function resetCamera() {
     setRawPhoto(null); setPhoto(null);
@@ -93,12 +179,15 @@ export default function RoomThread() {
       // Refresh messages so the new photo appears immediately
       const [msgs, reported] = await Promise.all([fetchRoomMessagesByCode(code), getReportedMessageIds()]);
       const filtered = msgs.filter((m) => !reported.has(m.id));
+      const sorted = [...filtered].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
       const uniqueIds = [...new Set(filtered.map((m) => m.sender_device_id))];
       const [names, rxns] = await Promise.all([
         getNicknames(uniqueIds),
         fetchReactions(filtered.map((m) => m.id)),
       ]);
-      setMessages(filtered);
+      setMessages(sorted);
       setSenderNames(names);
       setReactions(rxns);
     } catch (e: any) {
@@ -118,13 +207,16 @@ export default function RoomThread() {
             getReportedMessageIds(),
           ]);
           const filtered = msgs.filter((m) => !reported.has(m.id));
+          const sorted = [...filtered].sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
           const uniqueIds = [...new Set(filtered.map((m) => m.sender_device_id))];
           const messageIds = filtered.map((m) => m.id);
           const [names, rxns] = await Promise.all([
             getNicknames(uniqueIds),
             fetchReactions(messageIds),
           ]);
-          setMessages(filtered);
+          setMessages(sorted);
           setNickname(nick);
           setMyDeviceId(deviceId);
           setSenderNames(names);
@@ -182,8 +274,65 @@ export default function RoomThread() {
     } catch {}
   }
 
+  const sunsetTopOpacity = sunsetAnim;
+  const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
+
   return (
     <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <View style={styles.roomWrapper}>
+      {/* Sunset flash overlay (one-time when unread) */}
+      <View
+        style={[StyleSheet.absoluteFillObject, { zIndex: 10 }]}
+        pointerEvents="none"
+      >
+        <Animated.View
+          style={[
+            styles.sunsetTop,
+            { opacity: sunsetTopOpacity },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.sunsetBottom,
+            { opacity: sunsetBottomOpacity },
+          ]}
+        />
+      </View>
+      {/* Cloud layer — behind messages, touches pass through */}
+      <View style={styles.cloudLayer} pointerEvents="none">
+        <DecorativeCloud
+          x={SCREEN_W * 0.6}
+          y={SCREEN_H * 0.05}
+          width={SCREEN_W * 0.55}
+          opacity={0.09}
+          variant={2}
+          driftY={6}
+          duration={60000}
+        />
+        <DecorativeCloud
+          x={-SCREEN_W * 0.1}
+          y={SCREEN_H * 0.35}
+          width={SCREEN_W * 0.45}
+          opacity={0.07}
+          variant={5}
+          driftY={8}
+          duration={75000}
+        />
+        <DecorativeCloud
+          x={SCREEN_W * 0.3}
+          y={SCREEN_H * 0.65}
+          width={SCREEN_W * 0.5}
+          opacity={0.08}
+          variant={1}
+          driftY={5}
+          duration={50000}
+        />
+      </View>
+      {/* Top gradient */}
+      <View
+        style={[styles.topGradient]}
+        pointerEvents="none"
+      />
     <SafeAreaView style={{ flex: 1 }}>
       {/* Header */}
       <View style={{
@@ -285,6 +434,7 @@ export default function RoomThread() {
         <Ionicons name="camera" size={28} color="white" />
       </TouchableOpacity>
     </SafeAreaView>
+    </View>
 
     {/* ─── Camera modal ──────────────────────────────────────────────────── */}
     <Modal visible={showCamera} animationType="slide" statusBarTranslucent>

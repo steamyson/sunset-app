@@ -7,6 +7,7 @@ import {
 import { Text } from "./Text";
 import { useEffect, useState } from "react";
 import { getLocalRoomCodes } from "../utils/rooms";
+import { getAllNicknames } from "../utils/nicknames";
 import { colors } from "../utils/theme";
 
 type Props = {
@@ -17,10 +18,14 @@ type Props = {
 
 export default function RecipientSelector({ onSend, onCancel, sending }: Props) {
   const [rooms, setRooms] = useState<string[]>([]);
+  const [nicknames, setNicknames] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    getLocalRoomCodes().then(setRooms);
+    Promise.all([getLocalRoomCodes(), getAllNicknames()]).then(([codes, nicks]) => {
+      setRooms(codes);
+      setNicknames(nicks);
+    });
   }, []);
 
   function toggle(code: string) {
@@ -111,11 +116,11 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
                     style={{
                       fontSize: 20,
                       fontWeight: "700",
-                      letterSpacing: 4,
+                      letterSpacing: nicknames[code] ? 0 : 4,
                       color: isSelected ? colors.cream : colors.charcoal,
                     }}
                   >
-                    {code}
+                    {nicknames[code] ?? code}
                   </Text>
                 </TouchableOpacity>
               );

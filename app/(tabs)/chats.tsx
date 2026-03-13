@@ -11,10 +11,16 @@ import {
   Easing,
   Dimensions,
   PanResponder,
+  StyleSheet,
 } from "react-native";
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withDecay,
+} from "react-native-reanimated";
 import { Text } from "../../components/Text";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -23,6 +29,9 @@ const { width: W, height: H } = Dimensions.get("window");
 const SKY_HEIGHT = H * 0.6;
 
 import * as Haptics from "expo-haptics";
+import { supabase } from "../../utils/supabase";
+import { getItem, setItem } from "../../utils/storage";
+import { getDeviceId } from "../../utils/device";
 import { fetchMyRooms, leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import { fetchLatestMessageTimes } from "../../utils/messages";
@@ -62,8 +71,16 @@ const GLOBE_STARS = Array.from({ length: 44 }, (_, i) => ({
   o: 0.3 + (i * 13 % 10) * 0.04,
 }));
 
+// Tab bar height approx (from _layout)
+const TAB_BAR_HEIGHT = 88;
+// Cloud zone starts below header; uses full content area down to tab bar
+const SKY_TOP_OFFSET = 100;
+const SKY_CONTENT_HEIGHT = H - TAB_BAR_HEIGHT;
+const UNREAD_PHOTOS_KEY = "unread_photos_v1";
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
+  const insets = useSafeAreaInsets();
   // Sun / glow animation
   const glowAnim   = useRef(new Animated.Value(0.5)).current;
   const pulseScale = useRef(new Animated.Value(1)).current;
@@ -104,11 +121,95 @@ export default function ChatsScreen() {
   const [optionsRoom, setOptionsRoom] = useState<Room | null>(null);
   const [leavingRoom, setLeavingRoom] = useState(false);
 
-  // Globe view toggle
-  const [showGlobe, setShowGlobe] = useState(false);
+  // Multi-select mode for leaving multiple rooms at once
+  const [selectModeForLeave, setSelectModeForLeave] = useState(false);
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+
+  // Unified zoom: 1 = sky, 0.35–0.55 = globe (with slight zoom-in), 0.78+ = return to sky
+  const zoomLevel = useRef(new Animated.Value(1)).current;
+  const zoomValueRef = useRef(1);
+  const zoomLastDist = useRef(0);
 
   // Lifted cloud (being dragged) — for visual feedback
   const [liftedRoomId, setLiftedRoomId] = useState<string | null>(null);
+
+  // Refs for realtime / unread handling
+  const currentRoomCodeRef = useRef<string | null>(null);
+  const roomsRef = useRef<Room[]>([]);
+  const myDeviceIdRef = useRef<string | null>(null);
+  roomsRef.current = rooms;
+
+  // Unified pinch (2-finger) — updates zoom directly, no setState during gesture
+  const sceneZoomResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (ev) => ev.nativeEvent.touches.length >= 2,
+      onPanResponderTerminationRequest: () => true,
+      onPanResponderGrant: (ev) => {
+        if (ev.nativeEvent.touches.length >= 2) {
+          const t0 = ev.nativeEvent.touches[0];
+          const t1 = ev.nativeEvent.touches[1];
+          zoomLastDist.current = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
+        }
+      },
+      onPanResponderMove: (ev) => {
+        if (ev.nativeEvent.touches.length >= 2 && zoomLastDist.current > 0) {
+          const t0 = ev.nativeEvent.touches[0];
+          const t1 = ev.nativeEvent.touches[1];
+          const dist = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
+          const ratio = dist / zoomLastDist.current;
+          let next = zoomValueRef.current * ratio;
+          next = Math.max(0.35, Math.min(1, next)); // allow full range during pinch
+          zoomValueRef.current = next;
+          zoomLevel.setValue(next);
+          zoomLastDist.current = dist;
+        }
+      },
+      onPanResponderRelease: () => {
+        zoomLastDist.current = 0;
+        const z = zoomValueRef.current;
+        // Globe zoom: 0.35–0.55 = slight zoom into globe. z >= 0.78 = return to sky.
+        if (z >= 0.78) {
+          zoomValueRef.current = 1;
+          setViewModeRef.current("sky");
+          Animated.timing(zoomLevel, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+        } else if (z < 0.6) {
+          setViewModeRef.current("globe");
+          const snapZ = Math.max(0.35, Math.min(0.55, z));
+          zoomValueRef.current = snapZ;
+          Animated.timing(zoomLevel, { toValue: snapZ, duration: 250, useNativeDriver: true }).start();
+        } else {
+          setViewModeRef.current("globe");
+          zoomValueRef.current = 0.55;
+          Animated.timing(zoomLevel, { toValue: 0.55, duration: 250, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
+
+  const goToGlobe = useCallback(() => {
+    zoomValueRef.current = 0.35;
+    Animated.timing(zoomLevel, { toValue: 0.35, duration: 400, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }).start();
+  }, [zoomLevel]);
+
+  const goToSky = useCallback(() => {
+    zoomValueRef.current = 1;
+    Animated.timing(zoomLevel, { toValue: 1, duration: 400, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }).start();
+  }, [zoomLevel]);
+
+  const [viewMode, setViewMode] = useState<"sky" | "globe">("sky");
+  const setViewModeRef = useRef(setViewMode);
+  setViewModeRef.current = setViewMode;
+
+  const goToGlobeWithMode = useCallback(() => {
+    setViewMode("globe");
+    goToGlobe();
+  }, [goToGlobe]);
+
+  const goToSkyWithMode = useCallback(() => {
+    setViewMode("sky");
+    goToSky();
+  }, [goToSky]);
 
   // Sky container height (from onLayout)
   const skyHeightRef = useRef(SKY_HEIGHT);
@@ -158,6 +259,34 @@ export default function ChatsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, []));
 
+  // When Chats screen is focused, clear "currently viewing room" (user came back from room)
+  useFocusEffect(useCallback(() => { currentRoomCodeRef.current = null; }, []));
+
+  // Supabase realtime: new photo INSERT → add room to unread if not currently viewing
+  useEffect(() => {
+    getDeviceId().then((id) => { myDeviceIdRef.current = id; });
+    const channel = supabase
+      .channel("messages-insert")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        async (payload: { new: { room_id: string; sender_device_id: string } }) => {
+          const { room_id, sender_device_id } = payload.new;
+          if (sender_device_id === myDeviceIdRef.current) return;
+          const room = roomsRef.current.find((r) => r.id === room_id);
+          if (!room) return;
+          if (currentRoomCodeRef.current === room.code) return;
+          setUnreadRooms((prev) => new Set([...prev, room.code]));
+          const raw = await getItem(UNREAD_PHOTOS_KEY);
+          const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+          map[room.code] = true;
+          await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   // Cloud width responsive to room count (reactive) — shrink more for 6–8 clouds to avoid overlap
   const cloudW = useMemo(() => {
     const n = Math.max(rooms.length, 1);
@@ -171,13 +300,13 @@ export default function ChatsScreen() {
     if (displayRooms.length === 0) return;
     const cw = cloudW;
     const ch = cw * (185 / 240);
-    const skyH = skyHeightRef.current;
     const minX = 0;
     const maxX = Math.max(0, W - cw);
-    const minY = 0;
-    const maxY = Math.max(0, skyH - ch);
+    const minY = SKY_TOP_OFFSET;
+    const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
     const PAD = 14;
-    displayRooms.forEach((room, i) => {
+    const updates: { anims: { baseX: Animated.Value; baseY: Animated.Value }; x: number; y: number }[] = [];
+    displayRooms.forEach((room) => {
       const anims = cloudAnimsRef.current[room.id];
       if (!anims) return;
       let x = (anims.baseX as any)._value;
@@ -201,8 +330,22 @@ export default function ChatsScreen() {
       }
       const clampedX = Math.max(minX, Math.min(maxX, x));
       const clampedY = Math.max(minY, Math.min(maxY, y));
-      anims.baseX.setValue(clampedX);
-      anims.baseY.setValue(clampedY);
+      updates.push({ anims, x: clampedX, y: clampedY });
+    });
+    const bboxLeft = Math.min(...updates.map((u) => u.x));
+    const bboxTop = Math.min(...updates.map((u) => u.y));
+    const bboxRight = Math.max(...updates.map((u) => u.x + cw));
+    const bboxBottom = Math.max(...updates.map((u) => u.y + ch));
+    const fits =
+      bboxLeft >= 0 &&
+      bboxTop >= SKY_TOP_OFFSET &&
+      bboxRight <= W &&
+      bboxBottom <= SKY_CONTENT_HEIGHT;
+    if (fits) return;
+    const springConfig = { tension: 60, friction: 12, useNativeDriver: false };
+    updates.forEach(({ anims, x, y }) => {
+      Animated.spring(anims.baseX, { toValue: x, ...springConfig }).start();
+      Animated.spring(anims.baseY, { toValue: y, ...springConfig }).start();
     });
   }, [rooms, cloudW]);
 
@@ -211,11 +354,10 @@ export default function ChatsScreen() {
     const displayRooms = rooms.slice(0, 8);
     const cw = cloudW;
     const ch = cw * (185 / 240);
-    const skyH = skyHeightRef.current;
     const minX = 0;
     const maxX = Math.max(0, W - cw);
-    const minY = 0;
-    const maxY = Math.max(0, skyH - ch);
+    const minY = SKY_TOP_OFFSET;
+    const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
 
     // Stop all running loops and clear anims when rooms or count changes
     Object.values(cloudLoopsRef.current).forEach((l) => l.stop());
@@ -237,24 +379,27 @@ export default function ChatsScreen() {
     }
 
     function findNonOverlappingPosition(): { x: number; y: number } {
-      for (let attempt = 0; attempt < 80; attempt++) {
-        const x = Math.random() * (maxX - minX || 1) + minX;
-        const y = Math.random() * (maxY - minY || 1) + minY;
-        if (!overlaps(x, y)) return { x, y };
-      }
-      // Fallback: place in a grid cell
       const n = placed.length;
-      const cols = Math.ceil(Math.sqrt(n + 1));
-      const rows = Math.ceil((n + 1) / cols);
+      const totalClouds = displayRooms.length;
+      const cols = Math.max(1, Math.ceil(Math.sqrt(totalClouds)));
+      const rows = Math.ceil(totalClouds / cols);
       const cellW = (maxX - minX) / cols || cw;
       const cellH = (maxY - minY) / rows || ch;
       const col = n % cols;
       const row = Math.floor(n / cols);
-      const x = minX + col * cellW + (cellW - cw) / 2 + (Math.random() - 0.5) * 20;
-      const y = minY + row * cellH + (cellH - ch) / 2 + (Math.random() - 0.5) * 20;
+      const baseX = minX + col * cellW + (cellW - cw) / 2;
+      const baseY = minY + row * cellH + (cellH - ch) / 2;
+      const jitter = Math.min(15, cellW * 0.15, cellH * 0.15);
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const x = baseX + (Math.random() - 0.5) * 2 * jitter;
+        const y = baseY + (Math.random() - 0.5) * 2 * jitter;
+        const clampedX = Math.max(minX, Math.min(maxX - cw, x));
+        const clampedY = Math.max(minY, Math.min(maxY - ch, y));
+        if (!overlaps(clampedX, clampedY)) return { x: clampedX, y: clampedY };
+      }
       return {
-        x: Math.max(minX, Math.min(maxX - cw, x)),
-        y: Math.max(minY, Math.min(maxY - ch, y)),
+        x: Math.max(minX, Math.min(maxX - cw, baseX)),
+        y: Math.max(minY, Math.min(maxY - ch, baseY)),
       };
     }
 
@@ -362,18 +507,32 @@ export default function ChatsScreen() {
     fitCloudsToView();
   }, [rooms, cloudW, fitCloudsToView]);
 
+  // fitCloudsToView on focus, with 300ms delay so screen transition completes first
+  useFocusEffect(
+    useCallback(() => {
+      const t = setTimeout(() => fitCloudsToView(), 300);
+      return () => clearTimeout(t);
+    }, [fitCloudsToView])
+  );
+
   // Callbacks for pan responder (tap vs long-press vs drag)
   const onTapRef     = useRef<(room: Room) => void>(() => {});
   const onOptionsRef = useRef<(room: Room) => void>(() => {});
-  onTapRef.current     = handleCloudPress;
-  onOptionsRef.current = (room) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setOptionsRoom(room); };
+  onTapRef.current   = handleCloudPress;
+  onOptionsRef.current = (room) => {
+    if (selectModeForLeave) {
+      toggleSelectModeSelection(room);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setOptionsRoom(room);
+    }
+  };
 
   function getOrCreateCloudPanResponder(room: Room, anims: { baseX: Animated.Value; baseY: Animated.Value }, cw: number) {
     if (cloudPanRespondersRef.current[room.id]) return cloudPanRespondersRef.current[room.id];
     const ch = cw * (185 / 240);
-    const skyH = skyHeightRef.current;
     const minX = 0, maxX = Math.max(0, W - cw);
-    const minY = 0, maxY = Math.max(0, skyH - ch);
+    const minY = SKY_TOP_OFFSET, maxY = Math.max(SKY_TOP_OFFSET, SKY_CONTENT_HEIGHT - ch);
 
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
     let dragging = false;
@@ -486,9 +645,52 @@ export default function ChatsScreen() {
     await Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${code}` });
   }
 
-  // Tap cloud → navigate into room
+  // Tap cloud → navigate into room (or toggle selection when in select mode)
   function handleCloudPress(room: Room) {
-    router.push(`/room/${room.code}`);
+    if (selectModeForLeave) {
+      setSelectedRoomIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(room.id)) next.delete(room.id);
+        else next.add(room.id);
+        return next;
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      currentRoomCodeRef.current = room.code;
+      setUnreadRooms((prev) => {
+        const next = new Set(prev);
+        next.delete(room.code);
+        return next;
+      });
+      getItem(UNREAD_PHOTOS_KEY).then((raw) => {
+        const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+        map[room.code] = false;
+        setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+      });
+      const unread = unreadRooms.has(room.code);
+      router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+    }
+  }
+
+  function toggleSelectModeSelection(room: Room) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectedRoomIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(room.id)) next.delete(room.id);
+      else next.add(room.id);
+      return next;
+    });
+  }
+
+  function enterSelectModeToLeave(room: Room) {
+    setOptionsRoom(null);
+    setSelectModeForLeave(true);
+    setSelectedRoomIds(new Set([room.id]));
+  }
+
+  function exitSelectMode() {
+    setSelectModeForLeave(false);
+    setSelectedRoomIds(new Set());
   }
 
   // ─── Options sheet actions ───────────────────────────────────────────────────
@@ -503,6 +705,19 @@ export default function ChatsScreen() {
     }
   }
 
+  async function handleLeaveMultipleRooms(roomIds: Set<string>) {
+    if (roomIds.size === 0) return;
+    const toLeave = rooms.filter((r) => roomIds.has(r.id));
+    setLeavingRoom(true);
+    try {
+      for (const room of toLeave) await leaveRoom(room.code);
+      setRooms((prev) => prev.filter((r) => !roomIds.has(r.id)));
+      exitSelectMode();
+    } finally {
+      setLeavingRoom(false);
+    }
+  }
+
   async function saveRename() {
     if (!renaming) return;
     await setRoomNickname(renaming.code, renameInput);
@@ -510,65 +725,247 @@ export default function ChatsScreen() {
     setRenaming(null);
   }
 
+  // Interpolations: 0.35–0.55 = globe (slight zoom), 0.78+ = sky
+  const skyScale = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 1], outputRange: [0.35, 0.55, 1] });
+  const skyOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.78], outputRange: [0, 0, 1] });
+  const globeOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.78], outputRange: [1, 1, 0] });
+  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.8], outputRange: [1, 1, 0] });
+  const globeScale = zoomLevel.interpolate({ inputRange: [0.35, 0.55], outputRange: [1, 1.35] });
+
+  // Content area height for globe centering (full screen minus tab bar)
+  const contentHeight = H - TAB_BAR_HEIGHT;
+
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: colors.sky }}>
     <View style={{ flex: 1 }}>
 
-      {/* Sunset glow rays */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.6, height: H * 0.55,
-        borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
-        backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.15, height: H * 0.42,
-        borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
-        backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 0.85, height: H * 0.30,
-        borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
-        backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
-      }} />
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        {/* Scene — full area (behind header), position absolute */}
+        {!loading && rooms.length > 0 && (
+          <View
+            onLayout={(e) => { skyHeightRef.current = e.nativeEvent.layout.height; }}
+            style={{
+              position: "absolute",
+              top: 0, left: 0, right: 0, bottom: 0,
+            }}
+            {...sceneZoomResponder.panHandlers}
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                backgroundColor: "#0a0f1e",
+                opacity: spaceBgOpacity,
+              }}
+            />
+            <Animated.View
+              pointerEvents="box-none"
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                transform: [{ scale: skyScale }],
+                opacity: skyOpacity,
+              }}
+            >
+              {/* Sunset glow — reduced extent and intensity to match original */}
+              <Animated.View pointerEvents="none" style={{
+                position: "absolute", top: 0, alignSelf: "center",
+                width: W * 1.6, height: H * 0.42,
+                borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
+                backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.14),
+              }} />
+              <Animated.View pointerEvents="none" style={{
+                position: "absolute", top: 0, alignSelf: "center",
+                width: W * 1.15, height: H * 0.32,
+                borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
+                backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.10),
+              }} />
+              <Animated.View pointerEvents="none" style={{
+                position: "absolute", top: 0, alignSelf: "center",
+                width: W * 0.85, height: H * 0.22,
+                borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
+                backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.16),
+              }} />
+              {/* Sun — back to original position at top */}
+              <Animated.View pointerEvents="none" style={{
+                position: "absolute", top: -155, alignSelf: "center",
+                transform: [{ scale: pulseScale }],
+              }}>
+                <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
+                <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
+                <View style={{
+                  position: "absolute", width: 140, height: 140, borderRadius: 70,
+                  backgroundColor: "#FFF59D", left: 85, top: 85,
+                  shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
+                }} />
+                <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
+              </Animated.View>
+              {DECORATIVE.map((d, i) => (
+                <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity}
+                  variant={d.variant} driftY={d.driftY} duration={d.duration} />
+              ))}
+              {rooms.slice(0, 8).map((room) => {
+                const anims = cloudAnimsRef.current[room.id];
+                const cw = cloudW;
+                if (!anims) return null;
+                const pr = getOrCreateCloudPanResponder(room, anims, cw);
+                return (
+                  <Animated.View
+                    key={room.id}
+                    style={{
+                      position: "absolute", left: 0, top: 0,
+                      transform: [{ translateX: anims.animX }, { translateY: anims.animY }],
+                    }}
+                    {...pr.panHandlers}
+                  >
+                    <View style={{
+                      width: cw, height: cw * (185 / 240),
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
+                      shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
+                      shadowRadius: liftedRoomId === room.id ? 16 : 4,
+                      elevation: liftedRoomId === room.id ? 12 : 2,
+                      zIndex: liftedRoomId === room.id ? 20 : 1,
+                    }}>
+                      <SkyCloud
+                        name={nicknames[room.code] ?? room.code}
+                        width={cw}
+                        unread={unreadRooms.has(room.code)}
+                        lifted={liftedRoomId === room.id}
+                        variant={roomVariant(room.code)}
+                      />
+                    </View>
+                  </Animated.View>
+                );
+              })}
+            </Animated.View>
+            <Animated.View
+              pointerEvents={viewMode === "globe" ? "box-none" : "none"}
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                opacity: globeOpacity,
+                transform: [{ scale: globeScale }],
+              }}
+            >
+              {viewMode === "globe" ? (
+                <GlobeView
+                  rooms={rooms}
+                  nicknames={nicknames}
+                  unreadRooms={unreadRooms}
+                  onClose={goToSkyWithMode}
+                  onEnterRoom={(room) => {
+                    currentRoomCodeRef.current = room.code;
+                    setUnreadRooms((prev) => {
+                      const next = new Set(prev);
+                      next.delete(room.code);
+                      return next;
+                    });
+                    getItem(UNREAD_PHOTOS_KEY).then((raw) => {
+                      const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+                      map[room.code] = false;
+                      setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+                    });
+                    const unread = unreadRooms.has(room.code);
+                    setTimeout(() => router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`), 420);
+                  }}
+                  zoomLevel={zoomLevel}
+                  zoomValueRef={zoomValueRef}
+                  contentHeight={contentHeight}
+                />
+              ) : null}
+            </Animated.View>
+          </View>
+        )}
 
-      {/* Sun */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: -155, alignSelf: "center",
-        transform: [{ scale: pulseScale }],
-      }}>
-        <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
-        <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
-        <View style={{
-          position: "absolute", width: 140, height: 140, borderRadius: 70,
-          backgroundColor: "#FFF59D", left: 85, top: 85,
-          shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
-        }} />
-        <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
-      </Animated.View>
+        {/* Select-mode bar (when selecting clouds to leave) */}
+        {selectModeForLeave && viewMode === "sky" && (
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 12,
+              paddingHorizontal: 20,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              zIndex: 100,
+            }}
+          >
+            <TouchableOpacity
+              onPress={exitSelectMode}
+              style={{
+                paddingVertical: 14,
+                paddingHorizontal: 20,
+                backgroundColor: colors.mist,
+                borderRadius: 14,
+              }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                if (selectedRoomIds.size === 0) return;
+                Alert.alert(
+                  `Leave ${selectedRoomIds.size} room${selectedRoomIds.size === 1 ? "" : "s"}?`,
+                  "You can rejoin anytime with the room code.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Leave", style: "destructive", onPress: () => handleLeaveMultipleRooms(selectedRoomIds) },
+                  ]
+                );
+              }}
+              disabled={selectedRoomIds.size === 0 || leavingRoom}
+              style={{
+                paddingVertical: 14,
+                paddingHorizontal: 24,
+                backgroundColor: selectedRoomIds.size > 0 ? colors.magenta : colors.ash + "66",
+                borderRadius: 14,
+              }}
+            >
+              {leavingRoom ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <Text style={{ fontSize: 16, fontWeight: "700", color: "white" }}>
+                  Leave {selectedRoomIds.size} room{selectedRoomIds.size === 1 ? "" : "s"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
-      <SafeAreaView style={{ flex: 1 }}>
-        {/* Header */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 8, flexDirection: "row", alignItems: "center" }}>
+        {/* Header — on top with zIndex; box-none so touches pass through to clouds below */}
+        <View
+          pointerEvents="box-none"
+          style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0,
+          paddingTop: insets.top + 8,
+          paddingHorizontal: 20,
+          paddingBottom: 8,
+          flexDirection: "row",
+          alignItems: "center",
+          zIndex: 100,
+          backgroundColor: "transparent",
+        }}>
           <View style={{ flex: 1, alignItems: "flex-start" }}>
             {rooms.length > 0 && (
               <TouchableOpacity
-                onPress={() => setShowGlobe((v) => !v)}
+                onPress={() => (viewMode === "sky" ? goToGlobeWithMode() : goToSkyWithMode())}
                 activeOpacity={0.85}
                 style={{
                   width: 42, height: 42, borderRadius: 21,
-                  backgroundColor: showGlobe ? colors.ember : colors.mist,
+                  backgroundColor: viewMode === "globe" ? colors.ember : colors.mist,
                   alignItems: "center", justifyContent: "center",
                 }}
               >
-                <Ionicons name="globe-outline" size={22} color={showGlobe ? "white" : colors.charcoal} />
+                <Ionicons name="globe-outline" size={22} color={viewMode === "globe" ? "white" : colors.charcoal} />
               </TouchableOpacity>
             )}
           </View>
-          <View style={{ flex: 1, alignItems: "center" }}>
+          <View style={{ flex: 1, alignItems: "center" }} pointerEvents="none">
             <Text style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -1 }}>Chats</Text>
             <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4 }}>quiet moments, shared words</Text>
           </View>
@@ -590,10 +987,13 @@ export default function ChatsScreen() {
           </View>
         </View>
 
-        {/* Sky scene */}
-        {loading ? (
-          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-        ) : rooms.length === 0 ? (
+        {/* Content — loading / empty (scene is absolute when rooms > 0) */}
+        {loading && (
+          <View style={{ flex: 1, justifyContent: "center", paddingTop: 120 }}>
+            <ActivityIndicator color={colors.ember} size="large" />
+          </View>
+        )}
+        {!loading && rooms.length === 0 && (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 60 }}>
             <Text style={{ fontSize: 64 }}>⛅</Text>
             <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
@@ -609,79 +1009,8 @@ export default function ChatsScreen() {
               <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Add a Room</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <View
-            onLayout={(e) => {
-              skyHeightRef.current = e.nativeEvent.layout.height;
-            }}
-            style={{ flex: 1, width: W }}
-          >
-            {/* Decorative background clouds */}
-            {DECORATIVE.map((d, i) => (
-              <DecorativeCloud key={i} x={d.x} y={d.y} width={d.width} opacity={d.opacity}
-                variant={d.variant} driftY={d.driftY} duration={d.duration} />
-            ))}
-
-            {/* Room clouds — tap to enter, long-press for options, drag to move */}
-            {rooms.slice(0, 8).map((room) => {
-              const anims = cloudAnimsRef.current[room.id];
-              const cw = cloudW;
-              if (!anims) return null;
-              const pr = getOrCreateCloudPanResponder(room, anims, cw);
-
-              return (
-                <Animated.View
-                  key={room.id}
-                  pointerEvents="box-none"
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    transform: [
-                      { translateX: anims.animX },
-                      { translateY: anims.animY },
-                    ],
-                  }}
-                  {...pr.panHandlers}
-                >
-                  <View
-                    style={{
-                      width: cw,
-                      height: cw * (185 / 240),
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
-                      shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
-                      shadowRadius: liftedRoomId === room.id ? 16 : 4,
-                      elevation: liftedRoomId === room.id ? 12 : 2,
-                      zIndex: liftedRoomId === room.id ? 20 : 1,
-                    }}
-                  >
-                    <SkyCloud
-                      name={nicknames[room.code] ?? room.code}
-                      width={cw}
-                      unread={unreadRooms.has(room.code)}
-                      lifted={liftedRoomId === room.id}
-                      variant={roomVariant(room.code)}
-                    />
-                  </View>
-                </Animated.View>
-              );
-            })}
-          </View>
         )}
       </SafeAreaView>
-
-      {/* Globe overlay — toggled via header button */}
-      {showGlobe && rooms.length > 0 && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
-          <GlobeView
-            rooms={rooms}
-            nicknames={nicknames}
-            unreadRooms={unreadRooms}
-            onClose={() => setShowGlobe(false)}
-          />
-        </View>
-      )}
 
       {/* Options sheet (long hold in place) */}
       <Modal
@@ -722,6 +1051,13 @@ export default function ChatsScreen() {
               style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
             >
               <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Room Code</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => optionsRoom && enterSelectModeToLeave(optionsRoom)}
+              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+            >
+              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Select multiple to leave</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -871,119 +1207,241 @@ export default function ChatsScreen() {
 }
 
 // ─── Globe view ───────────────────────────────────────────────────────────────
+function cloudLonOffset(id: string): number {
+  return ((id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 37) - 18) * 0.02;
+}
+
+type SharedNum = { value: number };
+
+function GlobeCloudItem({
+  room,
+  baseLon,
+  baseLat,
+  lonOffset,
+  rotLon,
+  rotLat,
+  cx,
+  cy,
+  nicknames,
+  unreadRooms,
+  onPress,
+}: {
+  room: Room;
+  baseLon: number;
+  baseLat: number;
+  lonOffset: number;
+  rotLon: SharedNum;
+  rotLat: SharedNum;
+  cx: number;
+  cy: number;
+  nicknames: Record<string, string>;
+  unreadRooms: Set<string>;
+  onPress: () => void;
+}) {
+  const animatedStyle = useAnimatedStyle(() => {
+    "worklet";
+    const adjLon = baseLon + rotLon.value + lonOffset;
+    const adjLat = Math.max(-0.6, Math.min(0.6, baseLat + rotLat.value));
+    const x3 = Math.cos(adjLat) * Math.sin(adjLon);
+    const y3 = Math.sin(adjLat);
+    const z3 = Math.cos(adjLat) * Math.cos(adjLon);
+    const screenX = cx + x3 * GLOBE_R;
+    const screenY = cy - y3 * GLOBE_R * 0.6;
+    const cw = 72 + z3 * 18;
+    const opacity = z3 > -0.2 ? 1 : 0.35;
+    const zIdx = Math.round(z3 * 10);
+    return {
+      position: "absolute" as const,
+      left: screenX - cw / 2,
+      top: screenY - cw * 0.4,
+      width: cw,
+      opacity,
+      zIndex: zIdx,
+    };
+  });
+
+  return (
+    <AnimatedReanimated.View style={animatedStyle}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={onPress}
+        style={{ flex: 1, minWidth: 1, minHeight: 1 }}
+      >
+        <SkyCloud
+          name={nicknames[room.code] ?? room.code}
+          width={72}
+          unread={unreadRooms.has(room.code)}
+          variant={roomVariant(room.code)}
+        />
+      </TouchableOpacity>
+    </AnimatedReanimated.View>
+  );
+}
+
 function GlobeView({
   rooms,
   nicknames,
   unreadRooms,
   onClose,
+  onEnterRoom,
+  zoomLevel,
+  zoomValueRef,
+  contentHeight,
 }: {
   rooms: Room[];
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
   onClose: () => void;
+  onEnterRoom: (room: Room) => void;
+  zoomLevel: Animated.Value;
+  zoomValueRef: React.MutableRefObject<number>;
+  contentHeight?: number;
 }) {
-  const [rot, setRot] = useState({ lon: 0, lat: 0 });
-  const rotRef = useRef(0);
+  const rotLon = useSharedValue(0);
+  const rotLat = useSharedValue(0);
+  const startLon = useRef(0);
+  const startLat = useRef(0);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-  useEffect(() => {
-    const t = setInterval(() => {
-      rotRef.current += 0.004;
-      setRot((r) => ({ ...r, lon: rotRef.current }));
-    }, 50);
-    return () => clearInterval(t);
-  }, []);
+  // 1-finger drag to rotate; only on background layer so cloud taps always reach clouds
+  const globePan = useRef<ReturnType<typeof PanResponder.create>>(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (ev, gs) => {
+        const dist = Math.sqrt(gs.dx * gs.dx + gs.dy * gs.dy);
+        return ev.nativeEvent.touches.length === 1 && dist > 8;
+      },
+      onPanResponderTerminationRequest: () => true,
+      onPanResponderGrant: () => {
+        startLon.current = rotLon.value;
+        startLat.current = rotLat.value;
+      },
+      onPanResponderMove: (ev, gs) => {
+        if (ev.nativeEvent.touches.length === 1) {
+          rotLon.value = startLon.current + gs.dx * 0.012;
+          rotLat.value = clamp(startLat.current - gs.dy * 0.012, -0.6, 0.6);
+        }
+      },
+      onPanResponderRelease: (_ev, gs) => {
+        const vx = (gs as { vx?: number }).vx ?? 0;
+        const vy = (gs as { vy?: number }).vy ?? 0;
+        rotLon.value = withDecay({
+          velocity: vx * 0.01,
+          deceleration: 0.997,
+        });
+        rotLat.value = withDecay({
+          velocity: -vy * 0.01,
+          deceleration: 0.997,
+          clamp: [-0.6, 0.6],
+        });
+      },
+    })
+  );
 
   const cx = W / 2;
-  const cy = H * 0.47;
-  const cloudW = W * 0.22 * 0.52;
+  const cy = (contentHeight ?? H) / 2;
 
-  const projected = rooms.slice(0, 8).map((room) => {
-    const { lon, lat } = roomGlobePos(room.code);
-    const dLon = lon - rot.lon;
-    const x = GLOBE_R * Math.sin(dLon) * Math.cos(lat);
-    const y = GLOBE_R * (Math.sin(lat) * Math.cos(rot.lat) - Math.cos(dLon) * Math.cos(lat) * Math.sin(rot.lat));
-    const depth = Math.cos(dLon) * Math.cos(lat) * Math.cos(rot.lat) + Math.sin(lat) * Math.sin(rot.lat);
-    return { room, x, y, depth };
-  }).sort((a, b) => a.depth - b.depth);
+  const displayRooms = rooms.slice(0, 8);
+
+  const starsOrbitStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotLon.value * (180 / Math.PI)}deg` }],
+  }));
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#0D1B2A" }}>
-      {GLOBE_STARS.map((s, i) => (
-        <View key={i} pointerEvents="none" style={{
-          position: "absolute", left: s.x, top: s.y,
-          width: s.r * 2, height: s.r * 2, borderRadius: s.r,
-          backgroundColor: "white", opacity: s.o,
-        }} />
-      ))}
-      <View pointerEvents="none" style={{
-        position: "absolute",
-        left: cx - GLOBE_R * 1.18, top: cy - GLOBE_R * 1.18,
-        width: GLOBE_R * 2.36, height: GLOBE_R * 2.36,
-        borderRadius: GLOBE_R * 1.18,
-        backgroundColor: "#4A90D9", opacity: 0.18,
-      }} />
-      <View pointerEvents="none" style={{
-        position: "absolute",
-        left: cx - GLOBE_R, top: cy - GLOBE_R,
-        width: GLOBE_R * 2, height: GLOBE_R * 2,
-        borderRadius: GLOBE_R,
-        backgroundColor: "#1E4DA0",
-        overflow: "hidden",
-      }}>
-        <View style={{
-          position: "absolute",
-          width: GLOBE_R * 1.4, height: GLOBE_R * 1.4, borderRadius: GLOBE_R * 0.7,
-          backgroundColor: "#4A90D9", opacity: 0.35,
-          top: GLOBE_R * 0.1, left: GLOBE_R * 0.15,
-        }} />
-        <View style={{
-          position: "absolute",
-          width: GLOBE_R * 0.55, height: GLOBE_R * 0.38, borderRadius: GLOBE_R * 0.28,
-          backgroundColor: "white", opacity: 0.07,
-          top: GLOBE_R * 0.18, left: GLOBE_R * 0.28,
-        }} />
-      </View>
-      {projected.map(({ room, x, y, depth }) => {
-        if (depth < -0.05) return null;
-        const cw = cloudW * Math.max(0.35, depth);
-        const alpha = depth < 0.15 ? Math.max(0, (depth + 0.05) / 0.2) : 1;
-        return (
-          <View key={room.id} pointerEvents="none" style={{
-            position: "absolute",
-            left: cx + x - cw / 2,
-            top: cy + y - (cw * 185 / 240) / 2,
-            opacity: alpha,
-          }}>
-            <SkyCloud
-              name={nicknames[room.code] ?? room.code}
-              width={cw}
-              unread={unreadRooms.has(room.code)}
-              variant={roomVariant(room.code)}
+    <View style={{ flex: 1, backgroundColor: "#0a0f1e" }}>
+      {/* Background: stars (orbit with rotation) + globe with pan handlers */}
+      <View style={StyleSheet.absoluteFill} {...globePan.current.panHandlers}>
+        <AnimatedReanimated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, starsOrbitStyle]}
+        >
+          {GLOBE_STARS.map((s, i) => (
+            <View
+              key={i}
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                left: s.x,
+                top: s.y,
+                width: s.r * 2,
+                height: s.r * 2,
+                borderRadius: s.r,
+                backgroundColor: "white",
+                opacity: s.o,
+              }}
             />
-          </View>
-        );
-      })}
-      <TouchableOpacity
-        onPress={onClose}
-        style={{
-          position: "absolute",
-          bottom: 100,
-          left: 0,
-          right: 0,
-          alignItems: "center",
-        }}
-      >
-        <View style={{
-          backgroundColor: "rgba(255,255,255,0.15)",
-          paddingHorizontal: 20,
-          paddingVertical: 10,
-          borderRadius: 22,
-        }}>
-          <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: "600" }}>
-            tap to return
-          </Text>
+          ))}
+        </AnimatedReanimated.View>
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: cx - GLOBE_R,
+            top: cy - GLOBE_R,
+            width: GLOBE_R * 2,
+            height: GLOBE_R * 2,
+            borderRadius: GLOBE_R,
+            backgroundColor: "#1a3a5c",
+            shadowColor: "#4A90D9",
+            shadowOffset: { width: 0, height: 0 },
+            shadowRadius: 40,
+            shadowOpacity: 0.8,
+            elevation: 20,
+            zIndex: 0,
+            overflow: "hidden",
+          }}
+        >
+          <View
+            style={{
+              position: "absolute",
+              width: GLOBE_R * 0.6,
+              height: GLOBE_R * 0.6,
+              borderRadius: GLOBE_R * 0.3,
+              backgroundColor: "#2a5f8f",
+              opacity: 0.6,
+              top: GLOBE_R * 0.2,
+              left: GLOBE_R * 0.2,
+            }}
+          />
         </View>
-      </TouchableOpacity>
+      </View>
+
+      {/* Foreground: clouds + hint — pan handlers so dragging on clouds also rotates globe */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none" {...globePan.current.panHandlers}>
+        {displayRooms.map((room) => (
+          <GlobeCloudItem
+            key={room.id}
+            room={room}
+            baseLon={roomGlobePos(room.code).lon}
+            baseLat={roomGlobePos(room.code).lat}
+            lonOffset={cloudLonOffset(room.id)}
+            rotLon={rotLon}
+            rotLat={rotLat}
+            cx={cx}
+            cy={cy}
+            nicknames={nicknames}
+            unreadRooms={unreadRooms}
+            onPress={() => {
+              onClose();
+              onEnterRoom(room);
+            }}
+          />
+        ))}
+        <TouchableOpacity
+          onPress={onClose}
+          style={{
+            position: "absolute",
+            bottom: 48,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "white", opacity: 0.4, fontSize: 12 }}>
+            pinch to return to your sky
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
