@@ -209,7 +209,9 @@ function NativeMap({ messages, myCoords }: {
 }) {
   const [selected, setSelected] = useState<Message[] | null>(null);
   const [zoomedIn, setZoomedIn] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<any>(null);
+  const hasAutoFitRef = useRef(false);
 
   const USA_REGION = {
     latitude: 39.5,
@@ -217,6 +219,33 @@ function NativeMap({ messages, myCoords }: {
     latitudeDelta: 42,
     longitudeDelta: 58,
   };
+
+  const clusters = clusterMessages(messages);
+
+  useEffect(() => {
+    if (!mapReady || clusters.length === 0 || hasAutoFitRef.current || !mapRef.current) return;
+    hasAutoFitRef.current = true;
+
+    const EDGE_PADDING = 64;
+
+    if (clusters.length === 1) {
+      mapRef.current.animateToRegion({
+        latitude: clusters[0].lat,
+        longitude: clusters[0].lng,
+        latitudeDelta: 0.03,
+        longitudeDelta: 0.03,
+      }, 500);
+    } else {
+      const coords = clusters.map((c) => ({
+        latitude: c.lat,
+        longitude: c.lng,
+      }));
+      mapRef.current.fitToCoordinates(coords, {
+        edgePadding: { top: EDGE_PADDING, right: EDGE_PADDING, bottom: EDGE_PADDING, left: EDGE_PADDING },
+        animated: true,
+      });
+    }
+  }, [mapReady, clusters]);
 
   function goToMyLocation() {
     if (!myCoords || !mapRef.current) return;
@@ -228,8 +257,6 @@ function NativeMap({ messages, myCoords }: {
     }, 600);
   }
 
-  const clusters = clusterMessages(messages);
-
   return (
     <View style={{ flex: 1 }}>
       <MapView
@@ -237,6 +264,7 @@ function NativeMap({ messages, myCoords }: {
         style={{ flex: 1 }}
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         initialRegion={USA_REGION}
+        onMapReady={() => setMapReady(true)}
         customMapStyle={Platform.OS === "android" ? mapStyle : []}
         showsUserLocation
         showsMyLocationButton={false}
