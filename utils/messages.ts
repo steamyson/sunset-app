@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
 import { getItem, setItem } from "./storage";
+import { getExpiresAt } from "./sunset";
 
 const REPORTS_STORAGE_KEY = "dusk_reported_message_ids";
 
@@ -225,3 +226,76 @@ export async function fetchAllMyMessages(roomIds: string[]): Promise<Message[]> 
   if (error) throw new Error(error.message);
   return (data ?? []) as Message[];
 }
+
+// ─── Phase 2.3: ephemeral chat messages with sunset expiry ───────────────────
+
+export type ChatMessage = {
+  id: string;
+  room_id: string;
+  device_id: string;
+  body: string;
+  is_preset: boolean;
+  preset_key: string | null;
+  created_at: string;
+  expires_at: string;
+  sunset_date: string;
+};
+
+export const PRESET_REACTIONS = [
+  { key: "fire",   label: "🔥" },
+  { key: "golden", label: "🌅" },
+  { key: "wow",    label: "👁" },
+  { key: "feels",  label: "🌊" },
+  { key: "magic",  label: "✨" },
+] as const;
+
+type SendMessageParams = {
+  roomId: string;
+  deviceId: string;
+  body: string;
+  isPreset?: boolean;
+  presetKey?: string;
+  location: { lat: number; lng: number };
+};
+
+export async function sendMessage(params: SendMessageParams): Promise<ChatMessage> {
+  const { roomId, deviceId, body, isPreset = false, presetKey, location } = params;
+
+  if (body.length > 100) {
+    throw new Error("Messages are limited to 100 characters.");
+  }
+
+  if (isPreset) {
+    const allowedKeys = PRESET_REACTIONS.map((r) => r.key);
+    if (!presetKey || !allowedKeys.includes(presetKey as (typeof allowedKeys)[number])) {
+      throw new Error("Invalid preset reaction key.");
+    }
+  } else {
+    if (body.trim().length === 0) {
+      throw new Error("Message body cannot be empty.");
+    }
+  }
+
+  const { expires_at, sunset_date } = await getExpiresAt(location.lat, location.lng);
+
+  const { data, error } = await supabase
+    .from("messages")
+    .insert({
+      room_id: roomId,
+      device_id: deviceId,
+      body,
+      is_preset: isPreset,
+      preset_key: isPreset ? presetKey ?? null : null,
+      expires_at,
+      sunset_date,
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to send message.");
+  }
+
+  return data as ChatMessage;
+}
+

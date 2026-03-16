@@ -37,6 +37,8 @@ import { FilterView } from "../../components/FilterView";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../../utils/filters";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { supabase } from "../../utils/supabase";
+import { createPost } from "../../utils/posts";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -174,6 +176,26 @@ export default function RoomThread() {
     try {
       const deviceId = await getDeviceId();
       await sendPhoto({ uri: photo, roomCodes: [code], deviceId, filter: activeFilter, adjustments: activeAdj });
+      // Also create a post record for the new room feed (posts + post-media pipeline)
+      try {
+        const { data: room, error: roomErr } = await supabase
+          .from("rooms")
+          .select("id")
+          .eq("code", code.toUpperCase())
+          .maybeSingle();
+        if (!roomErr && room) {
+          await createPost({
+            roomId: room.id,
+            roomCode: code,
+            deviceId,
+            mediaUri: photo,
+            // Caption support can be threaded in later; for now, posts have no caption.
+            location: { lat: 0, lng: 0 },
+          });
+        }
+      } catch (e) {
+        console.error("createPost failed", e);
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeCamera();
       // Refresh messages so the new photo appears immediately

@@ -35,6 +35,64 @@ export function goldenHourWindowStart(sunsetTime: Date): Date {
   return new Date(sunsetTime.getTime() - WINDOW_BEFORE_MS);
 }
 
+// ─── Phase 2.1: sunset helpers for posts/messages ───────────────────────────
+
+type SunsetCacheValue = {
+  date: string; // YYYY-MM-DD (UTC)
+  sunset: Date;
+};
+
+// In-memory cache keyed by rounded lat/lng + date, e.g. "37.77,-122.42,2026-03-16"
+const sunsetCache: Record<string, SunsetCacheValue> = {};
+
+function cacheKeyFor(lat: number, lng: number, date: string): string {
+  return `${lat.toFixed(2)},${lng.toFixed(2)},${date}`;
+}
+
+/**
+ * Fetch today's sunset time for a given coordinate from sunrise-sunset.org,
+ * cached in memory for the current day.
+ */
+export async function getSunsetTimestamp(lat: number, lng: number): Promise<Date> {
+  const today = todayString();
+  const key = cacheKeyFor(lat, lng, today);
+  const cached = sunsetCache[key];
+  if (cached && cached.date === today) {
+    return cached.sunset;
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.sunrise-sunset.org/json?lat=${lat}&lng=${lng}&formatted=0`
+    );
+    const json = await res.json();
+    if (json.status === "OK" && json.results?.sunset) {
+      const sunset = new Date(json.results.sunset);
+      sunsetCache[key] = { date: today, sunset };
+      return sunset;
+    }
+  } catch (e) {
+    console.warn("getSunsetTimestamp: falling back to default sunset time", e);
+  }
+
+  // Fallback: 7:30pm local time today so the app keeps working
+  const fallback = new Date();
+  fallback.setHours(19, 30, 0, 0);
+  sunsetCache[key] = { date: today, sunset: fallback };
+  return fallback;
+}
+
+/**
+ * Helper for DB inserts: returns ISO expires_at and sunset_date (UTC date string)
+ * derived from the sunset timestamp at the given location.
+ */
+export async function getExpiresAt(lat: number, lng: number): Promise<{ expires_at: string; sunset_date: string }> {
+  const sunset = await getSunsetTimestamp(lat, lng);
+  const expires_at = sunset.toISOString();
+  const sunset_date = expires_at.slice(0, 10); // YYYY-MM-DD in UTC, matches expires_at::date
+  return { expires_at, sunset_date };
+}
+
 export async function fetchSunsetTime(): Promise<SunsetInfo | null> {
   try {
     // Check cache for today
