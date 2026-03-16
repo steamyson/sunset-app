@@ -1,0 +1,48 @@
+---
+description: High-level phased build plan for Dusk (posts, messages, room feed, sky canvas, auth, notifications)
+alwaysApply: false
+globs: ""
+---
+
+# Dusk Build Plan (from `dusk-cursor-prompts.md`)
+
+- **General**
+  - Treat this file as the canonical **roadmap** for upcoming features.
+  - When the user asks to work on a phase or task mentioned here, follow the described requirements and constraints.
+  - Never start new phases without explicit user direction on scope and priority.
+
+- **Phase 1 – Database foundation**
+  - Implement `posts` and `messages` tables via Supabase SQL migrations with:
+    - Proper foreign keys to `rooms`, `expires_at` / `sunset_date` columns, and CHECK constraints.
+    - Indexes for active-feed queries and cleanup jobs.
+    - RLS policies driven by `rooms.members` and `app.device_id` session variable.
+  - Add a `post-media` storage bucket with RLS aligned to the `posts` table.
+  - Add a `set_device_session` helper and Postgres function, called once after loading `device_id`.
+  - Add an Edge Function `cleanup-expired` that deletes expired posts/messages and their media, and is triggered via cron.
+
+- **Phase 2 – Sunset expiry utilities**
+  - Extend `utils/sunset.ts` (or consolidate with existing sunset logic) with:
+    - `getSunsetTimestamp` that hits `sunrise-sunset.org` and caches per‑day per‑location.
+    - `getExpiresAt` that returns `{ expires_at, sunset_date }` ready for DB inserts.
+  - Create `utils/posts.ts` with `createPost` and `getPostsForRoom`, handling:
+    - Upload to `post-media`, DB insert, and cleanup on failure.
+  - Create `utils/messages.ts` with `sendMessage`, `Message` type, and `PRESET_REACTIONS` constants.
+
+- **Phase 3 – Room screen**
+  - Build `app/(tabs)/room/[code].tsx` as a full‑screen, vertically paged photo feed backed by `posts`.
+  - Add `MessageOverlay` (floating, fading message pills) and `ChatInputBar` components, wired to `sendMessage`.
+  - Add realtime Supabase subscription for `messages` in a room, including an initial recent‑messages fetch.
+  - Add photo capture/upload with `expo-image-picker`, using `createPost` and the sunset expiry utilities.
+
+- **Phase 4 – Sky canvas polish**
+  - Add subtle lateral drift to room clouds using additive `Animated.Value`s (non‑persistent offset).
+  - Implement globe zoom‑out mode for chats:
+    - Triggered by pinch, crossfades from sky to globe.
+    - `GlobeView` driven by Reanimated with drag‑to‑rotate and clickable room dots.
+
+- **Phase 5 – Auth and notifications**
+  - Add optional email OTP auth flow using Supabase auth to link `device_id` to a user.
+  - Add `push_tokens` table, `registerForPushNotifications` helper, and an Edge Function `notify-room` for post‑based notifications.
+
+> When in doubt, refer back to `C:\Users\akiva\Downloads\dusk-cursor-prompts.md` for full detail before implementing or modifying any of these phases.
+

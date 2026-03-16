@@ -19,6 +19,21 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+/**
+ * Set the Postgres session-local device id used by RLS policies.
+ * Must be called once after the device ID is known, before any inserts/deletes
+ * on tables that rely on current_setting('app.device_id', true).
+ */
+export async function setDeviceSession(deviceId: string): Promise<void> {
+  if (!deviceId) return;
+  try {
+    // Best-effort: ignore errors so app can still function in degraded mode
+    await supabase.rpc("set_device_session", { device_id: deviceId });
+  } catch {
+    // ignore
+  }
+}
+
 export type Room = {
   id: string;
   code: string;

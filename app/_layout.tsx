@@ -7,6 +7,7 @@ import { Caveat_400Regular, Caveat_700Bold } from "@expo-google-fonts/caveat";
 import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
 import { getDeviceId } from "../utils/device";
+import { setDeviceSession } from "../utils/supabase";
 import { registerPushToken } from "../utils/push";
 import { getAuthUser, linkDeviceToUser } from "../utils/auth";
 import { SunriseIntro } from "../components/SunriseIntro";
@@ -19,7 +20,10 @@ export default function RootLayout() {
     async function init() {
       await initNotifications();
       const [nickname, deviceId] = await Promise.all([getLocalNickname(), getDeviceId()]);
-      if (deviceId) registerPushToken(deviceId).catch(() => {});
+      if (deviceId) {
+        setDeviceSession(deviceId).catch(() => {});
+        registerPushToken(deviceId).catch(() => {});
+      }
 
       // If already signed in, keep device linked to account
       const user = await getAuthUser();

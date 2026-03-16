@@ -696,28 +696,38 @@ export default function ChatsScreen() {
   }
 
   // ─── Options sheet actions ───────────────────────────────────────────────────
-  async function handleLeaveRoom(room: Room) {
+  function handleLeaveRoom(room: Room) {
     setLeavingRoom(true);
-    try {
-      await leaveRoom(room.code);
-      setRooms((prev) => prev.filter((r) => r.id !== room.id));
-      setOptionsRoom(null);
-    } finally {
+    // Optimistic: remove room from UI immediately
+    setRooms((prev) => prev.filter((r) => r.id !== room.id));
+    setOptionsRoom(null);
+    const code = room.code;
+    leaveRoom(code).catch((e) => {
+      console.error("Failed to leave room", code, e);
+    }).finally(() => {
       setLeavingRoom(false);
-    }
+    });
   }
 
-  async function handleLeaveMultipleRooms(roomIds: Set<string>) {
+  function handleLeaveMultipleRooms(roomIds: Set<string>) {
     if (roomIds.size === 0) return;
     const toLeave = rooms.filter((r) => roomIds.has(r.id));
     setLeavingRoom(true);
-    try {
-      for (const room of toLeave) await leaveRoom(room.code);
-      setRooms((prev) => prev.filter((r) => !roomIds.has(r.id)));
-      exitSelectMode();
-    } finally {
+    // Optimistic: drop all selected rooms from UI at once
+    setRooms((prev) => prev.filter((r) => !roomIds.has(r.id)));
+    exitSelectMode();
+
+    const codes = toLeave.map((room) => room.code);
+    Promise.allSettled(codes.map((code) => leaveRoom(code))).then((results) => {
+      const failed = results
+        .map((res, idx) => ({ res, code: codes[idx] }))
+        .filter((x) => x.res.status === "rejected");
+      if (failed.length > 0) {
+        console.error("Failed to leave some rooms", failed.map((f) => f.code));
+      }
+    }).finally(() => {
       setLeavingRoom(false);
-    }
+    });
   }
 
   async function saveRename() {
@@ -967,9 +977,14 @@ export default function ChatsScreen() {
               </TouchableOpacity>
             )}
           </View>
-          <View style={{ flex: 1, alignItems: "center" }} pointerEvents="none">
-            <Text style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -1 }}>Chats</Text>
-            <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4 }}>quiet moments, shared words</Text>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="clip"
+              style={{ fontSize: 28, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, maxWidth: 180, textAlign: "center" }}
+            >
+              Your Sky
+            </Text>
           </View>
           <View style={{ flex: 1, alignItems: "flex-end" }}>
             <TouchableOpacity

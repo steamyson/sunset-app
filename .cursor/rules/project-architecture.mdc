@@ -1,0 +1,37 @@
+---
+description: High-level architecture and conventions for the Dusk app
+alwaysApply: true
+---
+
+# Dusk App Architecture & Conventions
+
+- **Platform & stack**
+  - Expo React Native app using TypeScript, `expo-router`, and `react-native-maps`.
+  - Supabase is the backend for auth, rooms, messages, and realtime.
+  - Styling is mostly inline style objects plus a shared `colors` palette.
+
+- **Navigation & screens**
+  - Routing is file-based under `app/` with tabs in `app/(tabs)/*`.
+  - `home.tsx` is the landing countdown; `(tabs)/chats.tsx` is the cloud “sky”; `(tabs)/map.tsx` shows pinned sunsets.
+  - Keep screen components as the orchestration layer; push complex visuals into `components/*` (e.g. `SkyCloud`, `CloudCard`, `SunriseIntro`).
+
+- **State & data**
+  - Use React state/hooks for UI state; side effects and data loading live in `useEffect` / `useFocusEffect`.
+  - Interactions with Supabase and storage go through `utils/*` helpers (e.g. `rooms`, `messages`, `lastSeen`, `identity`) rather than inline queries.
+  - Prefer optimistic UI updates (update local state first, then fire async calls; log or gracefully handle failures).
+
+- **Animations & gestures**
+  - Use React Native `Animated` for home and chats, and `react-native-reanimated` where already set up (e.g. globe rotation).
+  - Prefer `useNativeDriver: true` for transforms/opacity when possible; if you need to read positions on JS (e.g. collision/drag), keep those specific animations on the JS driver.
+  - For gestures (pan, pinch, etc.), avoid calling `setState` in `onPanResponderMove`; mutate refs / `Animated.Value`s instead to keep the UI smooth.
+
+- **Maps**
+  - `react-native-maps` is lazy-required in `(tabs)/map.tsx` and never imported on web.
+  - Use the built-in helpers (`fitToCoordinates`, `animateToRegion`) for camera control rather than hand-rolling zoom math.
+  - Cluster nearby messages into a single marker and show count badges only when zoomed in past the configured threshold.
+
+- **Patterns & style**
+  - Components use the shared `Text` wrapper for consistent typography.
+  - Keep magic numbers for layout and animation durations local to the file unless clearly reused.
+  - When adding new screens or major UI blocks, follow the existing pattern: top-level `SafeAreaView` or `View` with explicit background color, then layered `Animated.View`s / content.
+
