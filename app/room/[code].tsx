@@ -11,6 +11,8 @@ import {
   StyleSheet,
   Animated,
   Easing,
+  FlatList,
+  Image,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,7 +40,11 @@ import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../../ut
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
-import { createPost } from "../../utils/posts";
+import { createPost, getPostsForRoom, type Post } from "../../utils/posts";
+import { MessageOverlay, type VisibleMessage } from "../../components/MessageOverlay";
+import { ChatInputBar } from "../../components/ChatInputBar";
+import { sendMessage, type ChatMessage } from "../../utils/messages";
+import * as Location from "expo-location";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -83,6 +89,25 @@ const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
 const FLASH_ICON: Record<string, "flash-off" | "flash"> = { off: "flash-off", on: "flash", auto: "flash" };
 const FLASH_LABEL: Record<string, string> = { off: "Off", on: "On", auto: "Auto" };
 
+type PostWithUrl = Post & { signedUrl: string | null };
+
+function formatCountdown(expiresAtISO: string): string {
+  const now = Date.now();
+  const expires = new Date(expiresAtISO).getTime();
+  const diff = expires - now;
+  if (diff <= 0) return "expired";
+  const totalSecs = Math.floor(diff / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hrs}h ${remMins}m`;
+  }
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
+}
+
 export default function RoomThread() {
   const params = useLocalSearchParams<{ code: string; unread?: string }>();
   const code = params.code;
@@ -93,6 +118,13 @@ export default function RoomThread() {
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<"feed" | "chat">("feed");
+
+  // Feed state
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [posts, setPosts] = useState<PostWithUrl[]>([]);
+  const [visibleMessages, setVisibleMessages] = useState<VisibleMessage[]>([]);
 
   // ─── In-room camera ───────────────────────────────────────────────────────
   const [showCamera, setShowCamera]       = useState(false);
@@ -108,6 +140,8 @@ export default function RoomThread() {
   const [permission, requestPermission]   = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const sunsetAnim = useRef(new Animated.Value(0)).current;
+  const roomIdRef = useRef<string | null>(null);
+  const locationRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
 
   // Check unread on mount: route param or SecureStore, run sunset flash if unread, then mark read
   useEffect(() => {
@@ -218,6 +252,43 @@ export default function RoomThread() {
     }
   }
 
+  async function loadFeed() {
+    if (!code) return;
+    setFeedLoading(true);
+    setFeedError(null);
+    try {
+      const { data: room, error: roomErr } = await supabase
+        .from("rooms")
+        .select("id")
+        .eq("code", code.toUpperCase())
+        .maybeSingle();
+
+      if (roomErr) throw new Error(roomErr.message);
+      if (!room) throw new Error("Room not found.");
+
+      const rawPosts = await getPostsForRoom(room.id);
+      roomIdRef.current = room.id;
+      const mapped: PostWithUrl[] = [];
+      for (const p of rawPosts) {
+        const { data, error: urlErr } = await supabase.storage
+          .from("post-media")
+          .createSignedUrl(p.media_url, 3600);
+        if (urlErr) {
+          console.error("Failed to create signed URL for post", p.id, urlErr);
+          mapped.push({ ...p, signedUrl: null });
+        } else {
+          mapped.push({ ...p, signedUrl: data.signedUrl });
+        }
+      }
+      setPosts(mapped);
+    } catch (e: any) {
+      console.error(e);
+      setFeedError(e.message ?? "Something went wrong.");
+    } finally {
+      setFeedLoading(false);
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
       async function load() {
@@ -252,6 +323,7 @@ export default function RoomThread() {
       }
       setLoading(true);
       load();
+      loadFeed();
     }, [code])
   );
 
@@ -298,6 +370,74 @@ export default function RoomThread() {
 
   const sunsetTopOpacity = sunsetAnim;
   const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | undefined;
+    if (posts.length > 0) {
+      timer = setInterval(() => {
+        setPosts((prev) => [...prev]);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [posts.length]);
+
+  // Supabase realtime: floating overlay for incoming chat messages
+  useEffect(() => {
+    const roomId = roomIdRef.current;
+    if (!roomId) return;
+
+    const channel = supabase
+      .channel("room-messages-overlay")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
+        (payload: { new: ChatMessage }) => {
+          const msg = payload.new;
+          // Ignore messages we sent ourselves (overlay is optimistic for local sends)
+          if (msg.device_id === myDeviceId) return;
+          const base: VisibleMessage = {
+            id: msg.id,
+            body: msg.body,
+            isPreset: msg.is_preset,
+            presetKey: msg.preset_key ?? undefined,
+          };
+          setVisibleMessages((prev) => [...prev.slice(-5), base]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [myDeviceId]);
+
+  // Read device location once for message expiry calculations
+  useEffect(() => {
+    let cancelled = false;
+    async function initLocation() {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted" || cancelled) return;
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!cancelled) {
+          locationRef.current = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+          };
+        }
+      } catch {
+        // fall back to { lat: 0, lng: 0 }
+      }
+    }
+    initLocation();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <ParticleTrail style={{ backgroundColor: colors.sky }}>
@@ -356,7 +496,7 @@ export default function RoomThread() {
         pointerEvents="none"
       />
     <SafeAreaView style={{ flex: 1 }}>
-      {/* Header */}
+      {/* Header with view toggle */}
       <View style={{
         flexDirection: "row", alignItems: "center",
         paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
@@ -396,7 +536,202 @@ export default function RoomThread() {
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {/* View toggle */}
+      <View
+        style={{
+          flexDirection: "row",
+          marginHorizontal: 20,
+          marginTop: 8,
+          marginBottom: 4,
+          borderRadius: 999,
+          backgroundColor: colors.mist,
+          padding: 3,
+        }}
+      >
+        {(["feed", "chat"] as const).map((mode) => (
+          <TouchableOpacity
+            key={mode}
+            onPress={() => setViewMode(mode)}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 999,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: viewMode === mode ? colors.charcoal : "transparent",
+            }}
+            activeOpacity={0.85}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "700",
+                color: viewMode === mode ? colors.cream : colors.ash,
+              }}
+            >
+              {mode === "feed" ? "Feed" : "Chat"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {viewMode === "feed" ? (
+        feedLoading ? (
+          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+        ) : feedError ? (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center", marginBottom: 8 }}>
+              Couldn&apos;t load this room
+            </Text>
+            <Text style={{ fontSize: 14, color: colors.ash, textAlign: "center" }}>
+              {feedError}
+            </Text>
+          </View>
+        ) : posts.length === 0 ? (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
+            <Text style={{ fontSize: 52 }}>🌄</Text>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
+              No posts yet
+            </Text>
+            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+              Capture your first sunset in this room to see it here.
+            </Text>
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              data={posts}
+              keyExtractor={(item) => item.id}
+              pagingEnabled
+              snapToAlignment="center"
+              decelerationRate="fast"
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
+                  {item.signedUrl ? (
+                    <Image
+                      source={{ uri: item.signedUrl }}
+                      style={{ width: SCREEN_W, height: SCREEN_H - 140 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
+                    </View>
+                  )}
+
+                  {/* Gradient overlay for caption area */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: (SCREEN_H - 140) * 0.28,
+                      backgroundColor: "rgba(0,0,0,0.45)",
+                    }}
+                  />
+
+                  {/* Caption */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 20,
+                      right: 20,
+                      bottom: 40,
+                    }}
+                  >
+                    {item.caption ? (
+                      <Text
+                        style={{
+                          fontSize: 18,
+                          fontWeight: "700",
+                          color: "white",
+                          textAlign: "left",
+                        }}
+                        numberOfLines={3}
+                      >
+                        {item.caption}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Expiry countdown */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 20,
+                      right: 16,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 16,
+                      backgroundColor: "rgba(0,0,0,0.55)",
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: "white" }}>
+                      {formatCountdown(item.expires_at)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            />
+
+            {/* Floating overlay and input for feed view */}
+            <MessageOverlay
+              messages={visibleMessages}
+              onExpire={(id) =>
+                setVisibleMessages((prev) => prev.filter((m) => m.id !== id))
+              }
+            />
+            <ChatInputBar
+              disabled={!roomIdRef.current || !myDeviceId}
+              onSendMessage={async (body) => {
+                if (!roomIdRef.current || !myDeviceId) return;
+                try {
+                  const msg = await sendMessage({
+                    roomId: roomIdRef.current,
+                    deviceId: myDeviceId,
+                    body,
+                    location: locationRef.current,
+                  });
+                  const overlay: VisibleMessage = {
+                    id: msg.id,
+                    body: msg.body,
+                    isPreset: msg.is_preset,
+                    presetKey: msg.preset_key ?? undefined,
+                  };
+                  setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
+                } catch (e) {
+                  console.error("sendMessage failed", e);
+                }
+              }}
+              onSendPreset={async (presetKey) => {
+                if (!roomIdRef.current || !myDeviceId) return;
+                try {
+                  const msg = await sendMessage({
+                    roomId: roomIdRef.current,
+                    deviceId: myDeviceId,
+                    body: presetKey,
+                    isPreset: true,
+                    presetKey,
+                    location: locationRef.current,
+                  });
+                  const overlay: VisibleMessage = {
+                    id: msg.id,
+                    body: msg.body,
+                    isPreset: msg.is_preset,
+                    presetKey: msg.preset_key ?? undefined,
+                  };
+                  setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
+                } catch (e) {
+                  console.error("sendMessage preset failed", e);
+                }
+              }}
+            />
+          </View>
+        )
+      ) : loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : messages.length === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>

@@ -424,10 +424,11 @@ export default function ChatsScreen() {
       };
 
       const v = roomVariant(room.code);
-      const durationX = 18000 + v * 2000;
-      const durationY = 25000 + v * 2500;
-      const driftAmt = 30;
-      const startToRight = Math.random() > 0.5;
+      // Subtle, deterministic drift per room: lateral ±6px over ~8–12s
+      const driftAmt = 6;
+      const durationX = 8000 + (v % 4) * 1000;  // 8–11s
+      const durationY = 10000 + (v % 4) * 1500; // 10–14.5s
+      const startToRight = (v % 2) === 0;       // deterministic direction
 
       let active = true;
       const loopX = Animated.loop(
