@@ -1293,6 +1293,7 @@ const ContinentPaths = React.memo(function ContinentPaths({ rotLon, rotLat }: { 
       // Per-point projection with z-based culling — no lat clamping (that caused straight edges)
       let pathStr = "";
       let movePending = true;
+      let hadCull = false;
       for (let i = 0; i < pts.length; i++) {
         const lon = pts[i][0] + rotLon.value;
         const lat = pts[i][1] + rotLat.value;
@@ -1300,13 +1301,13 @@ const ContinentPaths = React.memo(function ContinentPaths({ rotLon, rotLat }: { 
         const x3 = cosLat * Math.sin(lon);
         const y3 = Math.sin(lat);
         const z3 = cosLat * Math.cos(lon);
-        if (z3 <= 0) { movePending = true; continue; } // behind globe — break path
+        if (z3 <= 0) { movePending = true; hadCull = true; continue; } // behind globe — break path
         const sx = Math.round((GLOBE_R + x3 * GLOBE_R) * 10) / 10;
         const sy = Math.round((GLOBE_R - y3 * GLOBE_R) * 10) / 10;
         if (movePending) { pathStr += `M${sx} ${sy}`; movePending = false; }
         else pathStr += `L${sx} ${sy}`;
       }
-      if (pathStr) d += pathStr + "Z";
+      if (pathStr) d += pathStr + (hadCull ? "" : "Z");
     }
     return { d: d || "M0 0" };
   });
@@ -1321,7 +1322,7 @@ const ContinentPaths = React.memo(function ContinentPaths({ rotLon, rotLat }: { 
     >
       <AnimatedPath
         animatedProps={animatedProps}
-        fill="#1e4a72"
+        fill="rgba(30,80,90,0.6)"
         stroke="rgba(180,220,255,0.7)"
         strokeWidth={1.5}
         strokeLinejoin="round"
