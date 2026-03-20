@@ -197,3 +197,278 @@ Icons: Ionicons for UI chrome. Emoji for decoration.
 - `react-native-reanimated` — advanced animations
 - `nativewind` + `tailwindcss` — utility styling
 - `@expo-google-fonts/*` — typography
+
+<!-- GSD:project-start source:PROJECT.md -->
+## Project
+
+**Dusk**
+
+Dusk is an ephemeral sunset photo-sharing app for iOS and Android built with React Native (Expo). Users create or join chat "rooms" visualized as drifting clouds on a sky canvas — rooms that expire on a sunset-to-sunset cycle. The home screen counts down to tonight's golden hour, which is the only time users can capture and share photos. The goal is App Store submission.
+
+**Core Value:** Photos tied to the daily sunset — rooms that bloom at golden hour and fade by the next one, shared with the small group of people you want to share that moment with.
+
+### Constraints
+
+- **Tech stack:** Expo 55 / React Native 0.83 — no new packages without asking
+- **No file restructuring** — do not move files or change routing structure
+- **`useNativeDriver: false`** required on sky canvas (`chats.tsx`) — canvas mixes scale + translate
+- **All colors from `utils/theme.ts`** — no hardcoded hex (except cloud SVG warm white fills)
+- **Always use `components/Text.tsx`** — never RN's `Text` directly
+- **Deterministic room appearance** — variant, color, and alias all derive from room code; never randomize
+<!-- GSD:project-end -->
+
+<!-- GSD:stack-start source:codebase/STACK.md -->
+## Technology Stack
+
+## Languages
+- TypeScript 5.9.2 - App codebase, strict mode enabled (`tsconfig.json`)
+- JavaScript - Build configuration (Babel, Metro, Tailwind)
+- JSX/TSX - React Native components
+## Runtime
+- Expo 55.0.5 - React Native managed SDK
+- React Native 0.83.2 - Cross-platform mobile framework
+- Node.js (inferred from npm)
+- npm - Lockfile: `package-lock.json` (present)
+## Frameworks
+- React 19.2.0 - UI library
+- React Native 0.83.2 - Mobile platform
+- Expo Router 55.0.5 - File-based routing (`app/` directory structure)
+- React Native Web 0.21.0 - Web fallback support
+- nativewind 4.2.2 - Utility-first styling for React Native
+- Tailwind CSS 4.2.1 - Styling configuration
+- Custom theme system in `utils/theme.ts` (colors object)
+- Expo Router 55.0.5 - Tab-based + stack navigation
+- File-based routes in `app/` with `(tabs)/` layout
+- React Native Reanimated 4.2.1 - High-performance animations (required: `useNativeDriver: false` on sky canvas in `app/(tabs)/chats.tsx`)
+- React Native Worklets 0.7.2 - Worklet runtime for animations
+- React Native SVG 15.15.3 - Cloud shape rendering (`components/SkyCloud.tsx`)
+- expo-camera 55.0.9 - Camera access with golden hour gating
+- expo-location 55.1.2 - Geolocation for sunset queries and reverse geocoding
+- expo-secure-store 55.0.8 - Encrypted device storage (SecureStore adapter in `utils/storage.ts`)
+- expo-notifications 55.0.12 - Local and push notifications
+- expo-haptics 55.0.8 - Haptic feedback
+- expo-image-manipulator 55.0.10 - Photo crop/filter processing
+- expo-image-picker 55.0.12 - Photo library access
+- expo-file-system 55.0.10 - File I/O for photo uploads
+- expo-crypto 55.0.9 - Cryptographic operations
+- expo-task-manager 55.0.9 - Background task scheduling
+- expo-background-fetch 55.0.9 - Background sync
+- expo-web-browser 55.0.9 - OAuth redirect handling
+- expo-linking 55.0.7 - Deep link parsing (`dusk://` scheme)
+- expo-constants 55.0.7 - App constants
+- expo-dev-client 55.0.14 - Development environment (required for native modules, not Expo Go)
+- react-native-maps 1.26.20 - Google Maps integration (Android/iOS only, web fallback)
+- Google Maps API key in `app.json` under `android.config.googleMaps.apiKey`
+- @expo/vector-icons 15.1.1 - Ionicons for UI chrome
+- @expo-google-fonts/* - 10 font families:
+## Key Dependencies
+- @supabase/supabase-js 2.99.1 - PostgreSQL backend client, authentication, file storage, real-time subscriptions
+- @expo/metro-runtime 55.0.6 - Metro bundler runtime
+- @expo/ngrok 4.1.0 - Tunnel support for physical device testing (`npm start -- --tunnel`)
+- react-native-safe-area-context 5.6.2 - Safe area insets handling
+- react-native-screens 4.23.0 - Native screen optimization
+## Configuration
+- `.env.local` - Supabase credentials (EXPO_PUBLIC_* public keys only)
+- `app.json` - Expo config with:
+- `tsconfig.json` - Extends `expo/tsconfig.base`, strict mode enabled
+- `babel.config.js` - Uses `babel-preset-expo`
+- `metro.config.js` - Metro bundler configuration
+- `tailwind.config.js` - Tailwind config with nativewind preset, custom color palette
+- iPhone/iPad portrait orientation only
+- Adaptive icon for Android
+- Package: `com.akivagroener.dusk`
+- Predictive back gesture disabled
+- Adaptive icon with 3 components (foreground, background, monochrome)
+## Platform Requirements
+- Expo dev client (not Expo Go) — required for native modules
+- Node.js + npm
+- TypeScript 5.9.2
+- `npx tsc --noEmit` validates strict mode before builds
+- EAS Build service for production APK/IPA
+- Build profiles: development, preview, production (`eas build --profile [name]`)
+- iOS 12+ (inferred from Expo 55)
+- Android 6.0+ (inferred from Expo 55)
+- Location permission (for sunset queries and reverse geocoding)
+- Camera permission (for photo capture)
+- Notifications permission (for sunset alerts and push)
+- Photo library permission (for media picker)
+<!-- GSD:stack-end -->
+
+<!-- GSD:conventions-start source:CONVENTIONS.md -->
+## Conventions
+
+## Language & Typing
+- **TypeScript strict mode** — `tsconfig.json` has strict enabled. `npx tsc --noEmit` is the type-check command.
+- Explicit types on exported functions and component props. Inline types preferred over separate interface files for small types.
+- Type aliases defined in `utils/supabase.ts` for domain types (e.g., `Room`, `Message`).
+- `as any` used sparingly (e.g., `(anim.x as any)._value` to read Animated internals).
+## File & Directory Naming
+- **App routes:** kebab-case files inside `app/`, e.g., `app/setup.tsx`, `app/home.tsx`
+- **Components:** PascalCase, e.g., `components/SkyCloud.tsx`, `components/CloudCard.tsx`
+- **Utils:** camelCase, e.g., `utils/rooms.ts`, `utils/lastSeen.ts`
+- **Constants:** SCREAMING_SNAKE within files, e.g., `SKY_W`, `BASE_CLOUD_W`, `EXPIRY_MS`
+## Component Patterns
+- Functional components only — no class components.
+- `forwardRef<View>` pattern used for components that need to expose ref (e.g., `SkyCloud`).
+- `useImperativeHandle` used with `ParticleCanvas` to expose imperative API.
+- **Always use `components/Text.tsx`** instead of RN's `Text` — applies Caveat font automatically.
+- Local function components defined inside the parent file (e.g., `GlobeView` lives inside `chats.tsx`).
+## Styling
+- **All colors from `utils/theme.ts` `colors` object.** Never hardcode hex except cloud SVG fills (`#FFFDF8` warm white, `#FFF3E0` lifted).
+- `utils/theme.ts` exports: `colors`, `cloudShape()`, `gradients`, `typography`, `spacing`, `radius`, `shadows`.
+- StyleSheet.create() used for static styles; inline style objects for dynamic values.
+- NativeWind / Tailwind available but sparingly used — StyleSheet is predominant.
+## Animation
+- `useNativeDriver: true` for transform/opacity animations (performance default).
+- `useNativeDriver: false` **required** on sky canvas (`chats.tsx`) — mixes scale + translate on same view.
+- Standard spring: `tension: 120, friction: 8`.
+- Easing: sine (inOut), quad (in/out), cubic for most sequences.
+- Two animation libraries coexist: RN's `Animated` (most places) and `react-native-reanimated` (sky canvas decorative drift).
+## Gesture Handling
+- `PanResponder` from React Native core — not Gesture Handler.
+- Gesture priority pattern: cloud responders use `onStartShouldSetPanResponder: true`; sky canvas uses `onMoveShouldSetPanResponder: true`.
+- `onPanResponderTerminationRequest: () => false` everywhere to prevent stealing.
+- Pan accumulation: `extractOffset()` on grant, `flattenOffset()` on release.
+## Data / Side Effects
+- **No localStorage / sessionStorage.** All local persistence via `utils/storage.ts` (SecureStore wrapper).
+- All Supabase calls are async/await with explicit error handling on critical paths; `console.error` for non-critical failures.
+- Optimistic updates for reactions — immediate UI update, revert on API error.
+- Local-first: rooms, nicknames, avatars stored locally; synced to Supabase on auth.
+## Error Handling
+- Mostly silent (`console.error`). User-facing errors only on critical modal dialogs (send failures, auth errors).
+- No global error boundary — errors bubble to React Native's default handler.
+- Supabase errors: destructure `{ data, error }`, throw `new Error(error.message)` on critical paths.
+## Constants & Magic Numbers
+- Screen dimensions computed once at module level: `const { width: W, height: H } = Dimensions.get("window")`.
+- Canvas geometry constants defined at file top: `SKY_W = W * 2.2`, `SKY_H = H * 2.2`, etc.
+- Cloud aspect ratio always `185/240` — never hardcode height independently.
+- Room variant deterministic: `charCode sum % 8` — never randomize.
+## Import Order (observed pattern)
+<!-- GSD:conventions-end -->
+
+<!-- GSD:architecture-start source:ARCHITECTURE.md -->
+## Architecture
+
+## Pattern Overview
+- Device-scoped identity with optional account linking for multi-device restore
+- Local-first architecture: rooms, nicknames, avatars, positions stored locally; synced to Supabase on auth
+- Deterministic rendering: room appearance (variant, color, position, alias) never randomizes—derives from code hash
+- 24-hour message expiry via Supabase TTL
+- Golden hour gating: camera capture restricted to 90-min-before to 45-min-after sunset
+- Gesture priority: cloud drags win initial touch; sky pan only claims on move; pinch-to-zoom midpoint-anchored
+- Optimistic UI: reactions, navigation, sent messages appear immediately; rollback on error
+- Particle canvas isolation: animations don't cause parent re-renders (forwardRef + imperative handle)
+## Layers
+- Purpose: File-based routing with tabs and modals. Entry flow: root init → setup (if no nickname) → home → tabs or camera.
+- Location: `app/_layout.tsx`, `app/(tabs)/_layout.tsx`, `app/index.tsx`, `app/setup.tsx`, `app/home.tsx`, `app/camera.tsx`, `app/room/[code].tsx`
+- Contains: Stack layout, tab bar, screen navigation, route guards
+- Depends on: Device ID, local nickname state, auth state
+- Used by: All screens
+- **Feed** (`app/(tabs)/index.tsx`): Scrollable photo card grid from all user's rooms. Shows sender badge, time, location (reverse geocoded), expiry warning, reaction bar. Fetches sunset time for countdown label.
+- **Sky Canvas** (`app/(tabs)/chats.tsx`): Most complex. Pan-responder gestures (cloud drag, sky pan), pinch-to-zoom with snap thresholds, globe view toggle, cloud position persistence. Collision detection on drop. Decorative drifting clouds. Cloud long-press → options sheet.
+- **Map** (`app/(tabs)/map.tsx`): Google Maps integration (Android/iOS) with web fallback. Clusters messages by 80m radius. Toggle "my sunsets" vs "room sunsets".
+- **Capture** (`app/(tabs)/capture.tsx`): Redirect to `/camera`.
+- **Profile** (`app/(tabs)/profile.tsx`): Avatar picker (16 emojis + photo), nickname edit, rooms list with member count + leave, sunset alerts toggle, email OTP / Google OAuth, room restoration on sign in.
+- Purpose: Full-screen camera modal with golden hour gating. Capture → CropView → FilterView → RecipientSelector → send.
+- Contains: Expo camera integration, flash toggle (off/on/auto), haptics, golden hour check, recipient multi-select
+- Depends on: Sunset times, location, user's rooms, device ID
+- Purpose: Single room message thread. Shows room nickname or code in header. Long-press message (600ms) → report. Expired messages show cloud placeholder.
+- Contains: Message list, input bar, reactions, expiry handling
+- Depends on: Room code, messages, reactions, reported IDs
+- **Device & Identity**: `utils/device.ts` (UUID v4), `utils/identity.ts` (nickname storage + sync), `utils/aliases.ts` (deterministic fallback names)
+- **Rooms & Auth**: `utils/rooms.ts` (create/join/leave/fetch), `utils/auth.ts` (email OTP + Google OAuth + room restore)
+- **Messages & Media**: `utils/messages.ts` (upload to Storage, fetch by room/device, location capture, expiry check), `utils/reactions.ts` (upsert/delete emoji reactions, optimistic UI)
+- **UI State**: `utils/lastSeen.ts` (per-room unread detection), `utils/filters.ts` (8 presets + 5 adjustments), `utils/nicknames.ts` (per-room nicknames)
+- **External APIs**: `utils/sunset.ts` (sunrise-sunset.org), `utils/geocoding.ts` (reverse geocode), `utils/notifications.ts` (native alerts), `utils/push.ts` (Expo push tokens)
+- **Backend**: `utils/supabase.ts` (Supabase client with SecureStore session adapter)
+- **Reusable**: `components/Text.tsx` (wrapper around RN Text for custom fonts), `components/CloudCard.tsx` (rounded card with seed-based background), `components/FilteredImage.tsx` (wraps RN Image with CSS filter array)
+- **Complex**: `components/SkyCloud.tsx` (cloud SVG with 8 variants, unread pulse animation), `components/CropView.tsx` (full-screen photo crop with corner handles), `components/FilterView.tsx` (8 filter presets + 5 sliders)
+- **Interactive**: `components/ReactionBar.tsx` (3 emojis, optimistic toggle), `components/RecipientSelector.tsx` (bottom sheet multi-select), `components/ParticleTrail.tsx` (isolated particle canvas, forwardRef'd for zero re-render churn), `components/SunriseIntro.tsx` (2.4s onboarding animation)
+- **Chat**: `components/ChatInputBar.tsx`, `components/MessageOverlay.tsx`
+- Location: `utils/theme.ts`
+- Contains: Color palette (charcoal, ash, mist, sky, cream, ember, magenta, plum), cloud shape variants (5 border-radius combos from seed), typography presets, spacing/radius/shadow tokens
+- Rule: Never hardcode hex except cloud SVG fills (warm white #FFFDF8, lifted #FFF3E0)
+## Data Flow
+## Key Abstractions
+- Purpose: Ensure room looks same across all devices
+- Examples: `app/(tabs)/chats.tsx` (`roomVariant()`, `roomGlobePos()`), `utils/theme.ts` (`cloudShape()`)
+- Pattern: `code.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % N` where N is variant count. Room code "ABCDEF" always produces variant 2, color 3, position (lon, lat) X. Never randomize.
+- Purpose: Unique, persistent identifier for the device (not user)
+- Examples: `utils/device.ts` (UUID v4 generated once, stored in SecureStore)
+- Pattern: Device ID is the primary key in multi-tenancy. Linked to user via auth; enables room restore on sign-in.
+- Purpose: Unify SecureStore (native) and localStorage (web)
+- Examples: `utils/storage.ts` (getItem/setItem bridge)
+- Pattern: Check `Platform.OS === "web"` → localStorage, else SecureStore. Never use localStorage directly.
+- Purpose: Allow server-side filtering by device ID without passing it in queries
+- Examples: `utils/supabase.ts` (`setDeviceSession()` calls RPC to set `app.device_id`)
+- Pattern: Device ID set once after init; enables policies like `members CONTAINS current_setting('app.device_id')`
+- Purpose: React to emoji tap instantly; rollback if API fails
+- Examples: `app/(tabs)/index.tsx` (`handleReactionUpdate()`), `utils/reactions.ts` (`toggleReaction()`)
+- Pattern: Update local state immediately → call API → on error, revert state
+- Purpose: Spawn particles without re-rendering parent
+- Examples: `app/home.tsx` (ParticleCanvas + useImperativeHandle), `components/ParticleTrail.tsx`
+- Pattern: forwardRef on canvas + imperative `spawn(x, y)` method via useImperativeHandle. Parent holds ref, calls `canvasRef.current?.spawn()` on gesture.
+- Purpose: Generate 8 shape variants with deterministic bumps
+- Examples: `components/SkyCloud.tsx` (SHAPE_VARIANTS array, CloudShape component)
+- Pattern: ViewBox 0 0 240 185, ASPECT = 185/240. Variants 0–3 have top-only bumps; 4–7 have mirrored top+bottom. Render order: top bumps → base ellipse → bottom bumps.
+- Purpose: Hide/show expired messages without deletion
+- Examples: `utils/messages.ts` (`isExpired()`, 24h const), `app/room/[code].tsx` (placeholder)
+- Pattern: 24h TTL via `EXPIRY_MS = 24 * 60 * 60 * 1000`. On fetch, messages > 24h old render as placeholder instead of photo.
+## Entry Points
+- Location: `app/_layout.tsx`
+- Triggers: App launch
+- Responsibilities: Initialize fonts (Caveat + Google Fonts), init notifications, register push token, check device ID + nickname, route to setup or home, show SunriseIntro overlay
+- Location: `app/home.tsx`
+- Triggers: After setup, before tabs
+- Responsibilities: Show sunset countdown, render pulsing sun glow, spawn spark particles on pan gesture, gesture-to-exit
+- Location: `app/index.tsx`
+- Triggers: Redirect from root if no nickname
+- Responsibilities: Show create/join UI, handle code input validation, display created code with share modal, sync identity on success
+- Location: `app/(tabs)/_layout.tsx`
+- Triggers: After home/setup
+- Responsibilities: Render 5-tab bar, central camera button (floating), delegate to feed/chats/map/profile screens
+- Location: `app/camera.tsx`
+- Triggers: Tab button or navigator.push("/camera")
+- Responsibilities: Full-screen camera, golden hour gate, capture → crop → filter → send flow
+- Location: `app/room/[code].tsx`
+- Triggers: Deep link `dusk://room/ABCDEF` or tap cloud on chats screen
+- Responsibilities: Load messages, fetch reactions, show chat input, display expiry placeholders, long-press report
+## Error Handling
+- Room operations: Try/catch wrapping Supabase calls. On error, show user-facing message (e.g., "Room not found. Check the code and try again."). Example: `utils/rooms.ts` (joinRoom, fetchMyRooms)
+- Message send: Try/catch in camera flow. On upload/insert error, show alert + stay in send screen. Example: `app/camera.tsx`
+- Photo/reactions: Fire-and-forget. Non-blocking errors logged to console only. Example: `app/(tabs)/index.tsx` (reactions), `utils/messages.ts` (notifications)
+- Location/push: Fail silently if permission denied or service unavailable. Example: `utils/messages.ts` (getLocation, error → null), `utils/notifications.ts` (try/catch with fallback)
+- Supabase session: Best-effort `setDeviceSession()` catch block ignores errors so app functions in degraded mode. Example: `app/_layout.tsx`, `utils/supabase.ts`
+## Cross-Cutting Concerns
+- Room code: 6 chars, alphanumeric (no ambiguous letters), uppercase. Validated in input (`app/index.tsx`) before API call.
+- Nickname: Max 24 chars, non-empty, trimmed. Example: `app/setup.tsx`
+- Photo URI: Validated post-capture (must be non-empty file:// or data:// URI).
+- Adjustments: JSON-encoded object (brightness, contrast, saturation, warmth, fade). Stored as string in DB.
+- Primary: Device UUID v4, auto-generated on first launch, persisted in SecureStore
+- Optional: Email OTP or Google OAuth, links device to user account
+- Session: Supabase auth.persistSession + SecureStore adapter keeps token fresh across app restarts
+- RLS policies enforce device_id matches current_setting('app.device_id') for rows the device can see
+- Local state: React hooks (useState, useRef) on screens. No global state manager (Redux, Zustand).
+- Persisted state: SecureStore for device ID, nickname, nicknames per room, cloud positions, reported message IDs, avatar, auth session
+- Real-time sync: Supabase realtime subscriptions on messages/reactions/rooms (not fully utilized in current code, but infrastructure ready)
+<!-- GSD:architecture-end -->
+
+<!-- GSD:workflow-start source:GSD defaults -->
+## GSD Workflow Enforcement
+
+Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
+
+Use these entry points:
+- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
+- `/gsd:debug` for investigation and bug fixing
+- `/gsd:execute-phase` for planned phase work
+
+Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
+<!-- GSD:workflow-end -->
+
+<!-- GSD:profile-start -->
+## Developer Profile
+
+> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
+> This section is managed by `generate-claude-profile` -- do not edit manually.
+<!-- GSD:profile-end -->

@@ -15,6 +15,7 @@
 
 - [ ] **SKY-01**: On canvas load, all room clouds are arranged without overlapping; all clouds shrink proportionally if needed to fit
 - [ ] **SKY-02**: When a new cloud is added, it is placed without overlapping existing clouds; all clouds shrink proportionally if space is tight
+- [ ] **SKY-03**: Tapping a room cloud zooms the camera into that cloud; the room screen emerges from inside the cloud rather than a plain navigation push
 
 ### Auth
 
@@ -51,21 +52,22 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GLOB-01 | Phase ? | Pending |
-| GLOB-02 | Phase ? | Pending |
-| GLOB-03 | Phase ? | Pending |
-| SKY-01 | Phase ? | Pending |
-| SKY-02 | Phase ? | Pending |
-| AUTH-01 | Phase ? | Pending |
-| AUTH-02 | Phase ? | Pending |
-| PUSH-01 | Phase ? | Pending |
-| PUSH-02 | Phase ? | Pending |
+| GLOB-01 | Phase 1 | Pending |
+| GLOB-02 | Phase 1 | Pending |
+| GLOB-03 | Phase 1 | Pending |
+| SKY-01 | Phase 2 | Pending |
+| SKY-02 | Phase 2 | Pending |
+| SKY-03 | Phase 2 | Pending |
+| AUTH-01 | Phase 3 | Pending |
+| AUTH-02 | Phase 3 | Pending |
+| PUSH-01 | Phase 4 | Pending |
+| PUSH-02 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 9 total
-- Mapped to phases: 0
-- Unmapped: 9 ⚠️ (roadmap pending)
+- v1 requirements: 10 total
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after initial definition*
+*Last updated: 2026-03-20 after roadmap creation*
