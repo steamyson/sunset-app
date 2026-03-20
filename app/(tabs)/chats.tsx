@@ -127,7 +127,7 @@ export default function ChatsScreen() {
   const [selectModeForLeave, setSelectModeForLeave] = useState(false);
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
 
-  // Unified zoom: 1 = sky, 0.35–0.55 = globe (with slight zoom-in), 0.78+ = return to sky
+  // Unified zoom: 1 = sky, 0.18-0.55 = globe (deeper zoom at lower values), 0.78+ = return to sky
   const zoomLevel = useRef(new Animated.Value(1)).current;
   const zoomValueRef = useRef(1);
   const zoomLastDist = useRef(0);
@@ -161,7 +161,7 @@ export default function ChatsScreen() {
           const dist = Math.hypot(t1.pageX - t0.pageX, t1.pageY - t0.pageY);
           const ratio = dist / zoomLastDist.current;
           let next = zoomValueRef.current * ratio;
-          next = Math.max(0.35, Math.min(1, next)); // allow full range during pinch
+          next = Math.max(0.18, Math.min(1, next)); // allow full range during pinch
           zoomValueRef.current = next;
           zoomLevel.setValue(next);
           zoomLastDist.current = dist;
@@ -177,7 +177,7 @@ export default function ChatsScreen() {
           Animated.timing(zoomLevel, { toValue: 1, duration: 250, useNativeDriver: true }).start();
         } else if (z < 0.6) {
           setViewModeRef.current("globe");
-          const snapZ = Math.max(0.35, Math.min(0.55, z));
+          const snapZ = Math.max(0.18, Math.min(0.55, z));
           zoomValueRef.current = snapZ;
           Animated.timing(zoomLevel, { toValue: snapZ, duration: 250, useNativeDriver: true }).start();
         } else {
@@ -189,6 +189,7 @@ export default function ChatsScreen() {
     })
   ).current;
 
+  // Globe entry point stays at 0.35 — user can pinch further to 0.18 floor
   const goToGlobe = useCallback(() => {
     zoomValueRef.current = 0.35;
     Animated.timing(zoomLevel, { toValue: 0.35, duration: 400, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }).start();
@@ -738,12 +739,12 @@ export default function ChatsScreen() {
     setRenaming(null);
   }
 
-  // Interpolations: 0.35–0.55 = globe (slight zoom), 0.78+ = sky
-  const skyScale = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 1], outputRange: [0.35, 0.55, 1] });
-  const skyOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.78], outputRange: [0, 0, 1] });
-  const globeOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.78], outputRange: [1, 1, 0] });
-  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.35, 0.55, 0.8], outputRange: [1, 1, 0] });
-  const globeScale = zoomLevel.interpolate({ inputRange: [0.35, 0.55], outputRange: [1, 1.35] });
+  // Interpolations: 0.18–0.55 = globe (deeper zoom at lower values), 0.78+ = sky
+  const skyScale = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 1], outputRange: [0.18, 0.55, 1] });
+  const skyOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [0, 0, 1] });
+  const globeOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [1, 1, 0] });
+  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.8], outputRange: [1, 1, 0] });
+  const globeScale = zoomLevel.interpolate({ inputRange: [0.18, 0.35, 0.55], outputRange: [1.7, 1.0, 1.35] });
 
   // Content area height for globe centering (full screen minus tab bar)
   const contentHeight = H - TAB_BAR_HEIGHT;
