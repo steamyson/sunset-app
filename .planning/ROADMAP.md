@@ -27,7 +27,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. User can pinch further into the sky canvas and the globe stays visible without snapping back to sky view
   2. The globe surface shows continent outlines as SVG line art that rotate together with the globe
   3. Dragging the globe rotates it — continent lines track the drag — while room clouds remain independently positioned above the surface
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Extend zoom floor to 0.18 and fix cloud back-face opacity
+- [ ] 01-02-PLAN.md — Add continent SVG line art with orthographic projection
+- [ ] 01-03-PLAN.md — Visual verification checkpoint (all GLOB requirements)
 
 ### Phase 2: Sky Canvas
 **Goal**: All room clouds are visible and non-overlapping on every canvas load and after every new room joins; tapping a cloud transitions into the room with a zoom-into-cloud animation
@@ -68,7 +73,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Globe | 0/TBD | Not started | - |
+| 1. Globe | 0/3 | Planning complete | - |
 | 2. Sky Canvas | 0/TBD | Not started | - |
 | 3. Auth | 0/TBD | Not started | - |
 | 4. Push Notifications | 0/TBD | Not started | - |
