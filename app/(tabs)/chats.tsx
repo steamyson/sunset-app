@@ -1269,7 +1269,7 @@ function GlobeCloudItem({
     const screenX = cx + x3 * GLOBE_R;
     const screenY = cy - y3 * GLOBE_R * 0.6;
     const cw = 72 + z3 * 18;
-    const opacity = z3 > -0.2 ? 1 : 0.35;
+    const opacity = z3 > 0 ? 1 : 0;
     const zIdx = Math.round(z3 * 10);
     return {
       position: "absolute" as const,
