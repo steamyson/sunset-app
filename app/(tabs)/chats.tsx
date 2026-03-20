@@ -807,11 +807,12 @@ export default function ChatsScreen() {
   }
 
   // Interpolations: 0.18–0.55 = globe (deeper zoom at lower values), 0.78+ = sky
-  const skyScale = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 1], outputRange: [0.18, 0.55, 1] });
-  const skyOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [0, 0, 1] });
-  const globeOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [1, 1, 0] });
-  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.8], outputRange: [1, 1, 0] });
-  const globeScale = zoomLevel.interpolate({ inputRange: [0.18, 0.35, 0.55], outputRange: [1.7, 1.0, 1.35] });
+  // extrapolate:'clamp' prevents out-of-range recalculations during pinch gesture
+  const skyScale = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 1], outputRange: [0.18, 0.55, 1], extrapolate: "clamp" });
+  const skyOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [0, 0, 1], extrapolate: "clamp" });
+  const globeOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [1, 1, 0], extrapolate: "clamp" });
+  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.8], outputRange: [1, 1, 0], extrapolate: "clamp" });
+  const globeScale = zoomLevel.interpolate({ inputRange: [0.18, 0.35, 0.55], outputRange: [1.7, 1.0, 1.35], extrapolate: "clamp" });
 
   // Content area height for globe centering (full screen minus tab bar)
   const contentHeight = H - TAB_BAR_HEIGHT;
@@ -1295,7 +1296,7 @@ export default function ChatsScreen() {
 type SharedNum = { value: number };
 
 // ─── Continent art (SVG line art rotating with globe) ─────────────────────────
-function ContinentPaths({ rotLon, rotLat }: { rotLon: SharedNum; rotLat: SharedNum }) {
+const ContinentPaths = React.memo(function ContinentPaths({ rotLon, rotLat }: { rotLon: SharedNum; rotLat: SharedNum }) {
   const animatedProps = useAnimatedProps(() => {
     "worklet";
     let d = "";
@@ -1345,7 +1346,7 @@ function ContinentPaths({ rotLon, rotLat }: { rotLon: SharedNum; rotLat: SharedN
       />
     </Svg>
   );
-}
+});
 
 // ─── Globe view ───────────────────────────────────────────────────────────────
 function cloudLonOffset(id: string): number {
