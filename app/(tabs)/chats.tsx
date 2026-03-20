@@ -1578,6 +1578,8 @@ function GlobeView({
               left: GLOBE_R * 0.2,
             }}
           />
+          {/* Continent art — rotates with globe, clipped to sphere by overflow:hidden */}
+          <ContinentPaths rotLon={rotLon} rotLat={rotLat} />
         </View>
       </View>
 
