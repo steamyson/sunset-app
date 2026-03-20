@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 1 context gathered
-last_updated: "2026-03-20T19:31:37.725Z"
-last_activity: 2026-03-20 — Roadmap created
+status: unknown
+stopped_at: Completed 01-globe-01-PLAN.md
+last_updated: "2026-03-20T19:54:49.087Z"
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 3
+  completed_plans: 1
 ---
 
 # Project State
@@ -21,16 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Photos tied to the daily sunset — rooms that bloom at golden hour and fade by the next one
-**Current focus:** Phase 1 — Globe
+**Current focus:** Phase 01 — globe
 
 ## Current Position
 
-Phase: 1 of 4 (Globe)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-03-20 — Roadmap created
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 01 (globe) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -52,6 +46,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01-globe P01 | 1 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -63,6 +58,8 @@ Recent decisions affecting current work:
 - Continent outlines as SVG path data in GlobeView (keeps globe self-contained in chats.tsx)
 - Proportional shrink (not drop) for collision resolution (preserves all rooms visible)
 - Email OTP + Google OAuth (no password — simpler onboarding)
+- [Phase 01-globe]: Zoom floor 0.18: globe renders at 1.7x scale at max depth for clear visual depth cue
+- [Phase 01-globe]: Back-face threshold set to z3 > 0 (exact hemisphere): eliminates cloud ghosting behind globe
 
 ### Pending Todos
 
@@ -75,6 +72,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T19:31:37.721Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-globe/01-CONTEXT.md
+Last session: 2026-03-20T19:54:49.083Z
+Stopped at: Completed 01-globe-01-PLAN.md
+Resume file: None
