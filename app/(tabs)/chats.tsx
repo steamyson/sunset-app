@@ -1302,7 +1302,7 @@ const ContinentPaths = React.memo(function ContinentPaths({ rotLon, rotLat }: { 
         const z3 = cosLat * Math.cos(lon);
         if (z3 <= 0) { movePending = true; continue; } // behind globe — break path
         const sx = Math.round((GLOBE_R + x3 * GLOBE_R) * 10) / 10;
-        const sy = Math.round((GLOBE_R - y3 * GLOBE_R * 0.6) * 10) / 10;
+        const sy = Math.round((GLOBE_R - y3 * GLOBE_R) * 10) / 10;
         if (movePending) { pathStr += `M${sx} ${sy}`; movePending = false; }
         else pathStr += `L${sx} ${sy}`;
       }
@@ -1370,7 +1370,7 @@ function GlobeCloudItem({
     const y3 = Math.sin(adjLat);
     const z3 = Math.cos(adjLat) * Math.cos(adjLon);
     const screenX = cx + x3 * GLOBE_R;
-    const screenY = cy - y3 * GLOBE_R * 0.6;
+    const screenY = cy - y3 * GLOBE_R;
     const cw = 72 + z3 * 18;
     const opacity = z3 > 0 ? 1 : 0;
     const zIdx = Math.round(z3 * 10);
