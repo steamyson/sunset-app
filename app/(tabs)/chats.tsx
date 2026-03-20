@@ -503,42 +503,23 @@ export default function ChatsScreen() {
         const maxX = Math.max(0, W - cw);
         const minY = SKY_TOP_OFFSET;
         const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
-        const cols = Math.max(1, Math.ceil(Math.sqrt(displayRooms.length)));
-        const rows = Math.ceil(displayRooms.length / cols);
-        const cellW = (maxX - minX) / cols || cw;
-        const cellH = (maxY - minY) / rows || ch;
+
+        // Compute cols from how many clouds actually fit side-by-side at this width.
+        // cellW = cw + PAD so each cell is exactly one cloud wide with a gap.
+        // canFitCols: how many such cells fit across W (treating last cell as needing no right PAD).
+        const canFitCols = Math.max(1, Math.floor((W + PAD) / (cw + PAD)));
+        const cols = Math.min(canFitCols, Math.ceil(Math.sqrt(displayRooms.length)));
+        const cellW = cw + PAD;
+        const cellH = ch + PAD;
 
         const attempt: { x: number; y: number }[] = [];
-
-        function overlapsAttempt(x: number, y: number): boolean {
-          for (const p of attempt) {
-            const dx = Math.abs((x + cw / 2) - (p.x + cw / 2));
-            const dy = Math.abs((y + cloudH / 2) - (p.y + cloudH / 2));
-            if (dx < cw + PAD && dy < cloudH + PAD) return true;
-          }
-          return false;
-        }
 
         displayRooms.forEach((_, n) => {
           const col = n % cols;
           const row = Math.floor(n / cols);
-          const baseX = minX + col * cellW + (cellW - cw) / 2;
-          const baseY = minY + row * cellH + (cellH - ch) / 2;
-          const jitter = Math.min(15, cellW * 0.15, cellH * 0.15);
-          let placed = false;
-          for (let a = 0; a < 30; a++) {
-            const x = baseX + (Math.random() - 0.5) * 2 * jitter;
-            const y = baseY + (Math.random() - 0.5) * 2 * jitter;
-            const cx = Math.max(minX, Math.min(maxX - cw, x));
-            const cy = Math.max(minY, Math.min(maxY - ch, y));
-            if (!overlapsAttempt(cx, cy)) { attempt.push({ x: cx, y: cy }); placed = true; break; }
-          }
-          if (!placed) {
-            attempt.push({
-              x: Math.max(minX, Math.min(maxX - cw, baseX)),
-              y: Math.max(minY, Math.min(maxY - ch, baseY)),
-            });
-          }
+          const x = Math.max(minX, Math.min(maxX, col * cellW));
+          const y = Math.max(minY, Math.min(maxY, minY + row * cellH));
+          attempt.push({ x, y });
         });
 
         // Verify final layout is collision-free
@@ -560,11 +541,12 @@ export default function ChatsScreen() {
       }
     }
 
-    // Save resolved positions to SecureStore for future loads
+    // Save resolved positions to SecureStore and update ref for future tab-switch re-runs
     const posMap: Record<string, { x: number; y: number }> = {};
     displayRooms.forEach((room, i) => {
       if (finalPositions) posMap[room.code] = finalPositions[i];
     });
+    savedPositionsRef.current = posMap;
     saveAllCloudPositions(posMap);
 
     const cw = effectiveCwRef.current;
@@ -771,6 +753,9 @@ export default function ChatsScreen() {
           const clampedX = Math.max(minX, Math.min(maxX, currX));
           const clampedY = Math.max(minY, Math.min(maxY, currY));
           cloudLoopsRef.current[room.id]?.restartAt(clampedX, clampedY);
+          // Update in-memory ref immediately so the next tab-switch re-layout uses the dragged position
+          if (!savedPositionsRef.current) savedPositionsRef.current = {};
+          savedPositionsRef.current[room.code] = { x: clampedX, y: clampedY };
           saveCloudPosition(room.code, clampedX, clampedY);
         } else if (!longFired) {
           onTapRef.current(room);
