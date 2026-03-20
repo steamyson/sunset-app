@@ -1332,6 +1332,7 @@ function ContinentPaths({ rotLon, rotLat }: { rotLon: SharedNum; rotLat: SharedN
     <Svg
       width={GLOBE_R * 2}
       height={GLOBE_R * 2}
+      viewBox={`0 0 ${GLOBE_R * 2} ${GLOBE_R * 2}`}
       pointerEvents="none"
       style={{ position: "absolute", left: 0, top: 0 }}
     >
