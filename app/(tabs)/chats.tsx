@@ -302,10 +302,12 @@ export default function ChatsScreen() {
   const cloudLoopsRef    = useRef<Record<string, { stop: () => void; restartAt: (x: number, y: number) => void }>>({});
   const cloudPanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
   const [, setAnimsReady] = useState(0); // force re-render after effect populates anims
-  // Shrink-loop result — effective cloud width after overlap resolution (initialized to formula max; updated by layout effect)
+  // Shrink-loop result — effective cloud width after overlap resolution (initialized to full base; updated by layout effect)
   const effectiveCwRef = useRef<number>(W * 0.54);
   // Saved positions loaded from SecureStore on mount (all-or-nothing per D-04)
   const savedPositionsRef = useRef<Record<string, { x: number; y: number }> | null>(null);
+  // Gate: layout effect must not run until saved positions have been attempted to load
+  const [positionsLoaded, setPositionsLoaded] = useState(false);
   // Track previous room IDs to detect new rooms added mid-session
   const prevRoomIdsRef = useRef<Set<string>>(new Set());
   // Per-cloud scale animated values for spring scale-in animation on new clouds
@@ -316,9 +318,12 @@ export default function ChatsScreen() {
     return () => { Object.values(cloudLoopsRef.current).forEach((l) => l.stop()); };
   }, []);
 
-  // Load saved cloud positions from SecureStore on mount (into ref, NOT state — avoids layout re-trigger)
+  // Load saved cloud positions from SecureStore on mount — set positionsLoaded when done so layout effect can proceed
   useEffect(() => {
-    loadSavedPositions().then((pos) => { savedPositionsRef.current = pos; });
+    loadSavedPositions().then((pos) => {
+      savedPositionsRef.current = pos;
+      setPositionsLoaded(true);
+    });
   }, []);
 
   // ─── Data loading ────────────────────────────────────────────────────────────
@@ -376,12 +381,8 @@ export default function ChatsScreen() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Cloud width responsive to room count (reactive) — shrink more for 6–8 clouds to avoid overlap
-  const cloudW = useMemo(() => {
-    const n = Math.max(rooms.length, 1);
-    const base = Math.max(W * 0.18, Math.min(W * 0.54, W * 0.54 * (3 / n) + W * 0.18));
-    return base;
-  }, [rooms.length]);
+  // Cloud width — always start at full base size; shrink loop reduces only if actual collisions occur
+  const cloudW = useMemo(() => W * 0.54, []);
 
   // Reposition clouds without overlap (called when cloud size changes)
   const fitCloudsToView = useCallback(() => {
@@ -440,6 +441,9 @@ export default function ChatsScreen() {
 
   // ─── Cloud bounce animations — start on mount and when rooms change ─────────
   useEffect(() => {
+    // Wait until saved positions have been loaded (or confirmed absent) before laying out
+    if (!positionsLoaded) return;
+
     const displayRooms = rooms.slice(0, 8);
 
     // Detect newly added rooms (not in prevRoomIdsRef)
@@ -448,7 +452,7 @@ export default function ChatsScreen() {
     currentRoomIds.forEach((id) => { if (!prevRoomIdsRef.current.has(id)) newRoomIds.add(id); });
     prevRoomIdsRef.current = currentRoomIds;
 
-    // Update effectiveCwRef baseline from formula
+    // Reset effective width to full base size; shrink loop will reduce only if collisions occur
     effectiveCwRef.current = cloudW;
 
     // Stop all running loops and clear anims when rooms or count changes
@@ -547,12 +551,12 @@ export default function ChatsScreen() {
           }
         }
 
-        if (!hasCollision || cw <= W * 0.18) {
+        if (!hasCollision || cw <= W * 0.40) {
           effectiveCwRef.current = cw;
           finalPositions = attempt;
           break;
         }
-        cw = Math.max(W * 0.18, cw * 0.90);
+        cw = Math.max(W * 0.40, cw * 0.90);
       }
     }
 
@@ -688,7 +692,7 @@ export default function ChatsScreen() {
     });
     setAnimsReady((n) => n + 1);
     fitCloudsToView();
-  }, [rooms, cloudW, fitCloudsToView]);
+  }, [rooms, cloudW, fitCloudsToView, positionsLoaded]);
 
   // fitCloudsToView on focus, with 300ms delay so screen transition completes first
   useFocusEffect(
