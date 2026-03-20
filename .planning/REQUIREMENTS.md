@@ -13,8 +13,8 @@
 
 ### Sky Canvas
 
-- [ ] **SKY-01**: On canvas load, all room clouds are arranged without overlapping; all clouds shrink proportionally if needed to fit
-- [ ] **SKY-02**: When a new cloud is added, it is placed without overlapping existing clouds; all clouds shrink proportionally if space is tight
+- [x] **SKY-01**: On canvas load, all room clouds are arranged without overlapping; all clouds shrink proportionally if needed to fit
+- [x] **SKY-02**: When a new cloud is added, it is placed without overlapping existing clouds; all clouds shrink proportionally if space is tight
 - [ ] **SKY-03**: Tapping a room cloud zooms the camera into that cloud; the room screen emerges from inside the cloud rather than a plain navigation push
 
 ### Auth
@@ -55,8 +55,8 @@
 | GLOB-01 | Phase 1 | Complete |
 | GLOB-02 | Phase 1 | Complete |
 | GLOB-03 | Phase 1 | Complete |
-| SKY-01 | Phase 2 | Pending |
-| SKY-02 | Phase 2 | Pending |
+| SKY-01 | Phase 2 | Complete |
+| SKY-02 | Phase 2 | Complete |
 | SKY-03 | Phase 2 | Pending |
 | AUTH-01 | Phase 3 | Pending |
 | AUTH-02 | Phase 3 | Pending |

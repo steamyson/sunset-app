@@ -43,10 +43,10 @@ Plans:
   2. When a new room cloud is added, it appears in a position that does not overlap any existing cloud
   3. When there is not enough space to place all clouds at full size, all clouds shrink proportionally so every room remains visible
   4. Tapping a cloud zooms the camera into it; the room screen emerges from inside the cloud (no plain navigation push)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 02-01-PLAN.md — Overlap-free layout with shrink-until-fits algorithm, position persistence, and new-cloud scale-in
+- [x] 02-01-PLAN.md — Overlap-free layout with shrink-until-fits algorithm, position persistence, and new-cloud scale-in
 - [ ] 02-02-PLAN.md — Zoom-into-cloud overlay animation and warm white room background
 
 ### Phase 3: Auth
@@ -78,6 +78,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Globe | 3/3 | Complete | 2026-03-20 |
-| 2. Sky Canvas | 0/2 | Not started | - |
+| 2. Sky Canvas | 1/2 | In Progress|  |
 | 3. Auth | 0/TBD | Not started | - |
 | 4. Push Notifications | 0/TBD | Not started | - |

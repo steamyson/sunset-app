@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-globe-03-PLAN.md (Phase 01 complete)
-last_updated: "2026-03-20T20:51:36.318Z"
+stopped_at: "Checkpoint at 02-01-PLAN.md Task 2: human-verify"
+last_updated: "2026-03-20T23:29:24.653Z"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 5
+  completed_plans: 4
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** Photos tied to the daily sunset — rooms that bloom at golden hour and fade by the next one
-**Current focus:** Phase 01 — globe
+**Current focus:** Phase 02 — sky-canvas
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
+Phase: 02 (sky-canvas) — EXECUTING
+Plan: 1 of 2
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Plan: Not started
 *Updated after each plan completion*
 | Phase 01-globe P01 | 1 | 2 tasks | 1 files |
 | Phase 01-globe P02 | 3m | 2 tasks | 1 files |
+| Phase 02-sky-canvas P01 | 3m | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,7 @@ Recent decisions affecting current work:
 - [Phase 01-globe]: Back-face threshold set to z3 > 0 (exact hemisphere): eliminates cloud ghosting behind globe
 - [Phase 01-globe]: Single AnimatedPath with all continents in one d string avoids per-continent useAnimatedProps overhead
 - [Phase 01-globe]: Centroid z-average back-face culling for continents consistent with GlobeCloudItem z3 check
+- [Phase 02-sky-canvas]: effectiveCwRef initialized to W*0.54 (not cloudW useMemo) to avoid TypeScript block-scoped-before-declaration error
 
 ### Pending Todos
 
@@ -75,6 +77,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T20:30:00.000Z
-Stopped at: Completed 01-globe-03-PLAN.md (Phase 01 complete)
+Last session: 2026-03-20T23:29:16.859Z
+Stopped at: Checkpoint at 02-01-PLAN.md Task 2: human-verify
 Resume file: None
