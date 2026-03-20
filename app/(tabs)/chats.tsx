@@ -134,6 +134,24 @@ const TAB_BAR_HEIGHT = 88;
 const SKY_TOP_OFFSET = 100;
 const SKY_CONTENT_HEIGHT = H - TAB_BAR_HEIGHT;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
+const CLOUD_POS_KEY = "cloud_pos_v1";
+
+async function loadSavedPositions(): Promise<Record<string, { x: number; y: number }> | null> {
+  const raw = await getItem(CLOUD_POS_KEY);
+  if (!raw) return null;
+  return JSON.parse(raw) as Record<string, { x: number; y: number }>;
+}
+
+async function saveAllCloudPositions(map: Record<string, { x: number; y: number }>): Promise<void> {
+  await setItem(CLOUD_POS_KEY, JSON.stringify(map));
+}
+
+async function saveCloudPosition(code: string, x: number, y: number): Promise<void> {
+  const raw = await getItem(CLOUD_POS_KEY);
+  const map: Record<string, { x: number; y: number }> = raw ? JSON.parse(raw) : {};
+  map[code] = { x, y };
+  await setItem(CLOUD_POS_KEY, JSON.stringify(map));
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
@@ -284,10 +302,23 @@ export default function ChatsScreen() {
   const cloudLoopsRef    = useRef<Record<string, { stop: () => void; restartAt: (x: number, y: number) => void }>>({});
   const cloudPanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
   const [, setAnimsReady] = useState(0); // force re-render after effect populates anims
+  // Shrink-loop result — effective cloud width after overlap resolution (initialized to formula max; updated by layout effect)
+  const effectiveCwRef = useRef<number>(W * 0.54);
+  // Saved positions loaded from SecureStore on mount (all-or-nothing per D-04)
+  const savedPositionsRef = useRef<Record<string, { x: number; y: number }> | null>(null);
+  // Track previous room IDs to detect new rooms added mid-session
+  const prevRoomIdsRef = useRef<Set<string>>(new Set());
+  // Per-cloud scale animated values for spring scale-in animation on new clouds
+  const cloudScalesRef = useRef<Record<string, Animated.Value>>({});
 
   // Stop all loops on unmount
   useEffect(() => {
     return () => { Object.values(cloudLoopsRef.current).forEach((l) => l.stop()); };
+  }, []);
+
+  // Load saved cloud positions from SecureStore on mount (into ref, NOT state — avoids layout re-trigger)
+  useEffect(() => {
+    loadSavedPositions().then((pos) => { savedPositionsRef.current = pos; });
   }, []);
 
   // ─── Data loading ────────────────────────────────────────────────────────────
@@ -356,7 +387,7 @@ export default function ChatsScreen() {
   const fitCloudsToView = useCallback(() => {
     const displayRooms = rooms.slice(0, 8);
     if (displayRooms.length === 0) return;
-    const cw = cloudW;
+    const cw = effectiveCwRef.current;
     const ch = cw * (185 / 240);
     const minX = 0;
     const maxX = Math.max(0, W - cw);
@@ -407,15 +438,18 @@ export default function ChatsScreen() {
     });
   }, [rooms, cloudW]);
 
-  // ─── Cloud bounce animations — start on mount and when rooms change (BUG FIX 1, FEATURES 1–3) ─
+  // ─── Cloud bounce animations — start on mount and when rooms change ─────────
   useEffect(() => {
     const displayRooms = rooms.slice(0, 8);
-    const cw = cloudW;
-    const ch = cw * (185 / 240);
-    const minX = 0;
-    const maxX = Math.max(0, W - cw);
-    const minY = SKY_TOP_OFFSET;
-    const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
+
+    // Detect newly added rooms (not in prevRoomIdsRef)
+    const currentRoomIds = new Set(displayRooms.map((r) => r.id));
+    const newRoomIds = new Set<string>();
+    currentRoomIds.forEach((id) => { if (!prevRoomIdsRef.current.has(id)) newRoomIds.add(id); });
+    prevRoomIdsRef.current = currentRoomIds;
+
+    // Update effectiveCwRef baseline from formula
+    effectiveCwRef.current = cloudW;
 
     // Stop all running loops and clear anims when rooms or count changes
     Object.values(cloudLoopsRef.current).forEach((l) => l.stop());
@@ -423,47 +457,122 @@ export default function ChatsScreen() {
     cloudAnimsRef.current = {};
     cloudPanRespondersRef.current = {};
 
+    // ── Position resolution: saved positions or fresh layout ─────────────────
     const PAD = 14;
-    const cloudH = ch * 0.62; // collision height
-    const placed: { x: number; y: number }[] = [];
 
-    function overlaps(x: number, y: number): boolean {
-      for (const p of placed) {
-        const dx = Math.abs((x + cw / 2) - (p.x + cw / 2));
-        const dy = Math.abs((y + cloudH / 2) - (p.y + cloudH / 2));
-        if (dx < cw + PAD && dy < cloudH + PAD) return true;
+    // Try saved positions (all-or-nothing per D-04)
+    const savedPos = savedPositionsRef.current;
+    const allSaved = savedPos !== null && displayRooms.every((r) => savedPos[r.code] !== undefined);
+
+    let finalPositions: { x: number; y: number }[] | null = null;
+
+    if (allSaved && savedPos) {
+      // Verify no collisions in saved layout at current cloudW
+      const cw = cloudW;
+      const ch = cw * (185 / 240);
+      const cloudH = ch * 0.62;
+      const savedPlaced = displayRooms.map((r) => savedPos[r.code]);
+      let savedHasCollision = false;
+      for (let i = 0; i < savedPlaced.length && !savedHasCollision; i++) {
+        for (let j = i + 1; j < savedPlaced.length; j++) {
+          const dx = Math.abs((savedPlaced[i].x + cw / 2) - (savedPlaced[j].x + cw / 2));
+          const dy = Math.abs((savedPlaced[i].y + cloudH / 2) - (savedPlaced[j].y + cloudH / 2));
+          if (dx < cw + PAD && dy < cloudH + PAD) { savedHasCollision = true; break; }
+        }
       }
-      return false;
+      if (!savedHasCollision) {
+        finalPositions = savedPlaced;
+        effectiveCwRef.current = cw;
+      } else {
+        // Discard saved positions — collision detected
+        savedPositionsRef.current = null;
+      }
     }
 
-    function findNonOverlappingPosition(): { x: number; y: number } {
-      const n = placed.length;
-      const totalClouds = displayRooms.length;
-      const cols = Math.max(1, Math.ceil(Math.sqrt(totalClouds)));
-      const rows = Math.ceil(totalClouds / cols);
-      const cellW = (maxX - minX) / cols || cw;
-      const cellH = (maxY - minY) / rows || ch;
-      const col = n % cols;
-      const row = Math.floor(n / cols);
-      const baseX = minX + col * cellW + (cellW - cw) / 2;
-      const baseY = minY + row * cellH + (cellH - ch) / 2;
-      const jitter = Math.min(15, cellW * 0.15, cellH * 0.15);
-      for (let attempt = 0; attempt < 30; attempt++) {
-        const x = baseX + (Math.random() - 0.5) * 2 * jitter;
-        const y = baseY + (Math.random() - 0.5) * 2 * jitter;
-        const clampedX = Math.max(minX, Math.min(maxX - cw, x));
-        const clampedY = Math.max(minY, Math.min(maxY - ch, y));
-        if (!overlaps(clampedX, clampedY)) return { x: clampedX, y: clampedY };
+    // Fresh layout with shrink-until-fits loop (D-01, D-02, D-03)
+    if (!finalPositions) {
+      let cw = cloudW;
+      while (true) {
+        const ch = cw * (185 / 240);
+        const cloudH = ch * 0.62;
+        const minX = 0;
+        const maxX = Math.max(0, W - cw);
+        const minY = SKY_TOP_OFFSET;
+        const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
+        const cols = Math.max(1, Math.ceil(Math.sqrt(displayRooms.length)));
+        const rows = Math.ceil(displayRooms.length / cols);
+        const cellW = (maxX - minX) / cols || cw;
+        const cellH = (maxY - minY) / rows || ch;
+
+        const attempt: { x: number; y: number }[] = [];
+
+        function overlapsAttempt(x: number, y: number): boolean {
+          for (const p of attempt) {
+            const dx = Math.abs((x + cw / 2) - (p.x + cw / 2));
+            const dy = Math.abs((y + cloudH / 2) - (p.y + cloudH / 2));
+            if (dx < cw + PAD && dy < cloudH + PAD) return true;
+          }
+          return false;
+        }
+
+        displayRooms.forEach((_, n) => {
+          const col = n % cols;
+          const row = Math.floor(n / cols);
+          const baseX = minX + col * cellW + (cellW - cw) / 2;
+          const baseY = minY + row * cellH + (cellH - ch) / 2;
+          const jitter = Math.min(15, cellW * 0.15, cellH * 0.15);
+          let placed = false;
+          for (let a = 0; a < 30; a++) {
+            const x = baseX + (Math.random() - 0.5) * 2 * jitter;
+            const y = baseY + (Math.random() - 0.5) * 2 * jitter;
+            const cx = Math.max(minX, Math.min(maxX - cw, x));
+            const cy = Math.max(minY, Math.min(maxY - ch, y));
+            if (!overlapsAttempt(cx, cy)) { attempt.push({ x: cx, y: cy }); placed = true; break; }
+          }
+          if (!placed) {
+            attempt.push({
+              x: Math.max(minX, Math.min(maxX - cw, baseX)),
+              y: Math.max(minY, Math.min(maxY - ch, baseY)),
+            });
+          }
+        });
+
+        // Verify final layout is collision-free
+        let hasCollision = false;
+        for (let i = 0; i < attempt.length && !hasCollision; i++) {
+          for (let j = i + 1; j < attempt.length; j++) {
+            const dx = Math.abs((attempt[i].x + cw / 2) - (attempt[j].x + cw / 2));
+            const dy = Math.abs((attempt[i].y + cloudH / 2) - (attempt[j].y + cloudH / 2));
+            if (dx < cw + PAD && dy < cloudH + PAD) { hasCollision = true; break; }
+          }
+        }
+
+        if (!hasCollision || cw <= W * 0.18) {
+          effectiveCwRef.current = cw;
+          finalPositions = attempt;
+          break;
+        }
+        cw = Math.max(W * 0.18, cw * 0.90);
       }
-      return {
-        x: Math.max(minX, Math.min(maxX - cw, baseX)),
-        y: Math.max(minY, Math.min(maxY - ch, baseY)),
-      };
     }
 
-    displayRooms.forEach((room) => {
-      const { x: startX, y: startY } = findNonOverlappingPosition();
-      placed.push({ x: startX, y: startY });
+    // Save resolved positions to SecureStore for future loads
+    const posMap: Record<string, { x: number; y: number }> = {};
+    displayRooms.forEach((room, i) => {
+      if (finalPositions) posMap[room.code] = finalPositions[i];
+    });
+    saveAllCloudPositions(posMap);
+
+    const cw = effectiveCwRef.current;
+    const ch = cw * (185 / 240);
+    const minX = 0;
+    const maxX = Math.max(0, W - cw);
+    const minY = SKY_TOP_OFFSET;
+    const maxY = Math.max(minY, SKY_CONTENT_HEIGHT - ch);
+
+    displayRooms.forEach((room, i) => {
+      const startX = finalPositions ? finalPositions[i].x : 0;
+      const startY = finalPositions ? finalPositions[i].y : 0;
 
       // Base = anchor position (drop location). Drift = oscillation on top. Position = base + drift.
       const baseX = new Animated.Value(startX);
@@ -478,6 +587,21 @@ export default function ChatsScreen() {
         driftX,
         driftY,
       };
+
+      // Spring scale-in for new rooms (D-05); existing rooms go to scale 1 immediately
+      if (newRoomIds.has(room.id)) {
+        cloudScalesRef.current[room.id] = new Animated.Value(0);
+        Animated.spring(cloudScalesRef.current[room.id], {
+          toValue: 1,
+          tension: 120,
+          friction: 8,
+          useNativeDriver: false,
+        }).start();
+      } else if (!cloudScalesRef.current[room.id]) {
+        cloudScalesRef.current[room.id] = new Animated.Value(1);
+      } else {
+        cloudScalesRef.current[room.id].setValue(1);
+      }
 
       const v = roomVariant(room.code);
       // Subtle, deterministic drift per room: lateral ±6px over ~8–12s
@@ -643,6 +767,7 @@ export default function ChatsScreen() {
           const clampedX = Math.max(minX, Math.min(maxX, currX));
           const clampedY = Math.max(minY, Math.min(maxY, currY));
           cloudLoopsRef.current[room.id]?.restartAt(clampedX, clampedY);
+          saveCloudPosition(room.code, clampedX, clampedY);
         } else if (!longFired) {
           onTapRef.current(room);
         }
@@ -876,9 +1001,10 @@ export default function ChatsScreen() {
               ))}
               {rooms.slice(0, 8).map((room) => {
                 const anims = cloudAnimsRef.current[room.id];
-                const cw = cloudW;
+                const cw = effectiveCwRef.current;
                 if (!anims) return null;
                 const pr = getOrCreateCloudPanResponder(room, anims, cw);
+                const cloudScale = cloudScalesRef.current[room.id] ?? new Animated.Value(1);
                 return (
                   <Animated.View
                     key={room.id}
@@ -888,23 +1014,25 @@ export default function ChatsScreen() {
                     }}
                     {...pr.panHandlers}
                   >
-                    <View style={{
-                      width: cw, height: cw * (185 / 240),
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
-                      shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
-                      shadowRadius: liftedRoomId === room.id ? 16 : 4,
-                      elevation: liftedRoomId === room.id ? 12 : 2,
-                      zIndex: liftedRoomId === room.id ? 20 : 1,
-                    }}>
-                      <SkyCloud
-                        name={nicknames[room.code] ?? room.code}
-                        width={cw}
-                        unread={unreadRooms.has(room.code)}
-                        lifted={liftedRoomId === room.id}
-                        variant={roomVariant(room.code)}
-                      />
-                    </View>
+                    <Animated.View style={{ transform: [{ scale: cloudScale }] }}>
+                      <View style={{
+                        width: cw, height: cw * (185 / 240),
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: liftedRoomId === room.id ? 8 : 2 },
+                        shadowOpacity: liftedRoomId === room.id ? 0.18 : 0.06,
+                        shadowRadius: liftedRoomId === room.id ? 16 : 4,
+                        elevation: liftedRoomId === room.id ? 12 : 2,
+                        zIndex: liftedRoomId === room.id ? 20 : 1,
+                      }}>
+                        <SkyCloud
+                          name={nicknames[room.code] ?? room.code}
+                          width={cw}
+                          unread={unreadRooms.has(room.code)}
+                          lifted={liftedRoomId === room.id}
+                          variant={roomVariant(room.code)}
+                        />
+                      </View>
+                    </Animated.View>
                   </Animated.View>
                 );
               })}
