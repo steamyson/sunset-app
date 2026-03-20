@@ -8,7 +8,7 @@
 ### Globe
 
 - [x] **GLOB-01**: User can zoom into globe deeper without it snapping back to sky canvas
-- [ ] **GLOB-02**: Globe surface displays continent outline line art (SVG, rotates with globe)
+- [x] **GLOB-02**: Globe surface displays continent outline line art (SVG, rotates with globe)
 - [x] **GLOB-03**: Dragging globe rotates it (continent lines move with it); room clouds drift independently on top
 
 ### Sky Canvas
@@ -53,7 +53,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | GLOB-01 | Phase 1 | Complete |
-| GLOB-02 | Phase 1 | Pending |
+| GLOB-02 | Phase 1 | Complete |
 | GLOB-03 | Phase 1 | Complete |
 | SKY-01 | Phase 2 | Pending |
 | SKY-02 | Phase 2 | Pending |

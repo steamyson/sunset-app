@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-globe-01-PLAN.md
-last_updated: "2026-03-20T19:54:49.087Z"
+stopped_at: Completed 01-globe-02-PLAN.md
+last_updated: "2026-03-20T19:59:14.957Z"
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-20)
 ## Current Position
 
 Phase: 01 (globe) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -47,6 +47,7 @@ Plan: 2 of 3
 
 *Updated after each plan completion*
 | Phase 01-globe P01 | 1 | 2 tasks | 1 files |
+| Phase 01-globe P02 | 3m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -60,6 +61,8 @@ Recent decisions affecting current work:
 - Email OTP + Google OAuth (no password — simpler onboarding)
 - [Phase 01-globe]: Zoom floor 0.18: globe renders at 1.7x scale at max depth for clear visual depth cue
 - [Phase 01-globe]: Back-face threshold set to z3 > 0 (exact hemisphere): eliminates cloud ghosting behind globe
+- [Phase 01-globe]: Single AnimatedPath with all continents in one d string avoids per-continent useAnimatedProps overhead
+- [Phase 01-globe]: Centroid z-average back-face culling for continents consistent with GlobeCloudItem z3 check
 
 ### Pending Todos
 
@@ -72,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T19:54:49.083Z
-Stopped at: Completed 01-globe-01-PLAN.md
+Last session: 2026-03-20T19:59:14.952Z
+Stopped at: Completed 01-globe-02-PLAN.md
 Resume file: None
