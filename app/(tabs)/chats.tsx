@@ -16,10 +16,12 @@ import {
 import AnimatedReanimated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedProps,
   withDecay,
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
+import Svg, { Path } from "react-native-svg";
 import { Text } from "../../components/Text";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -41,6 +43,8 @@ import { getAllLastSeen } from "../../utils/lastSeen";
 import { colors } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
 import type { Room } from "../../utils/supabase";
+
+const AnimatedPath = AnimatedReanimated.createAnimatedComponent(Path);
 
 // Decorative background clouds — positions within fixed W x SKY_HEIGHT
 const DECORATIVE = [
@@ -72,6 +76,57 @@ const GLOBE_STARS = Array.from({ length: 44 }, (_, i) => ({
   r: 0.5 + (i * 7 % 3) * 0.5,
   o: 0.3 + (i * 13 % 10) * 0.04,
 }));
+
+// Simplified continent polygon data — [lon_rad, lat_rad] pairs
+// Intentionally rough blob shapes ("star atlas" aesthetic, not cartographic)
+// Lat clamped to +-0.6 rad to match globe's oblate projection
+// Web platform intentionally unsupported for animated SVG path d strings (Reanimated 4.x worklet limitation)
+const CONTINENTS: [number, number][][] = [
+  // North America — centered around lon -100deg, lat 45deg (clamped to 0.6)
+  [
+    [-2.09, 0.60], [-1.92, 0.60], [-1.57, 0.55], [-1.22, 0.50],
+    [-1.05, 0.40], [-1.22, 0.30], [-1.40, 0.20], [-1.57, 0.15],
+    [-1.74, 0.20], [-1.92, 0.25], [-2.09, 0.35], [-2.27, 0.45],
+    [-2.27, 0.55],
+  ],
+  // South America — centered around lon -60deg, lat -15deg
+  [
+    [-1.22, 0.10], [-1.05, 0.05], [-0.87, -0.05], [-0.79, -0.15],
+    [-0.70, -0.30], [-0.70, -0.45], [-0.79, -0.55], [-0.96, -0.50],
+    [-1.05, -0.35], [-1.13, -0.20], [-1.22, -0.05],
+  ],
+  // Europe — centered around lon 15deg, lat 50deg (clamped to 0.6)
+  [
+    [-0.09, 0.55], [0.09, 0.60], [0.26, 0.60], [0.44, 0.55],
+    [0.52, 0.50], [0.52, 0.42], [0.35, 0.38], [0.17, 0.40],
+    [0.00, 0.45], [-0.09, 0.50],
+  ],
+  // Africa — centered around lon 20deg, lat 5deg
+  [
+    [-0.05, 0.35], [0.17, 0.38], [0.35, 0.35], [0.52, 0.25],
+    [0.70, 0.15], [0.70, 0.00], [0.61, -0.15], [0.52, -0.30],
+    [0.35, -0.45], [0.17, -0.35], [0.00, -0.20], [-0.09, -0.05],
+    [-0.17, 0.15],
+  ],
+  // Asia — centered around lon 90deg, lat 45deg (clamped to 0.6)
+  [
+    [0.52, 0.55], [0.79, 0.60], [1.05, 0.60], [1.40, 0.55],
+    [1.74, 0.50], [2.09, 0.40], [2.27, 0.30], [2.09, 0.15],
+    [1.74, 0.05], [1.40, 0.10], [1.05, 0.20], [0.79, 0.30],
+    [0.52, 0.40],
+  ],
+  // Australia — centered around lon 135deg, lat -25deg
+  [
+    [1.83, -0.15], [2.09, -0.15], [2.36, -0.22], [2.44, -0.35],
+    [2.27, -0.48], [2.01, -0.50], [1.83, -0.42], [1.74, -0.30],
+  ],
+  // Antarctica — centered around lon 0deg, lat -80deg (clamped to -0.6)
+  [
+    [-1.57, -0.58], [-0.79, -0.60], [0.00, -0.58], [0.79, -0.60],
+    [1.57, -0.58], [1.57, -0.55], [0.79, -0.52], [0.00, -0.55],
+    [-0.79, -0.52], [-1.57, -0.55],
+  ],
+];
 
 // Tab bar height approx (from _layout)
 const TAB_BAR_HEIGHT = 88;
@@ -1225,12 +1280,64 @@ export default function ChatsScreen() {
   );
 }
 
+type SharedNum = { value: number };
+
+// ─── Continent art (SVG line art rotating with globe) ─────────────────────────
+function ContinentPaths({ rotLon, rotLat }: { rotLon: SharedNum; rotLat: SharedNum }) {
+  const animatedProps = useAnimatedProps(() => {
+    "worklet";
+    let d = "";
+    for (let c = 0; c < CONTINENTS.length; c++) {
+      const pts = CONTINENTS[c];
+      // Compute centroid z for back-face culling
+      let czSum = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const lon = pts[i][0] + rotLon.value;
+        const lat = Math.max(-0.6, Math.min(0.6, pts[i][1] + rotLat.value));
+        czSum += Math.cos(lat) * Math.cos(lon);
+      }
+      if (czSum / pts.length <= 0) continue; // back-face: skip entire continent
+
+      let pathStr = "";
+      for (let i = 0; i < pts.length; i++) {
+        const lon = pts[i][0] + rotLon.value;
+        const lat = Math.max(-0.6, Math.min(0.6, pts[i][1] + rotLat.value));
+        const x3 = Math.cos(lat) * Math.sin(lon);
+        const y3 = Math.sin(lat);
+        // SVG-local coords: origin at top-left of GLOBE_R*2 x GLOBE_R*2 SVG
+        // GLOBE_R is the center offset; 0.6 squash matches the oblate projection
+        const sx = Math.round((GLOBE_R + x3 * GLOBE_R) * 10) / 10;
+        const sy = Math.round((GLOBE_R - y3 * GLOBE_R * 0.6) * 10) / 10;
+        pathStr += i === 0 ? `M${sx} ${sy}` : `L${sx} ${sy}`;
+      }
+      pathStr += "Z";
+      d += pathStr;
+    }
+    return { d: d || "M0 0" };
+  });
+
+  return (
+    <Svg
+      width={GLOBE_R * 2}
+      height={GLOBE_R * 2}
+      pointerEvents="none"
+      style={{ position: "absolute", left: 0, top: 0 }}
+    >
+      <AnimatedPath
+        animatedProps={animatedProps}
+        fill="#1e4a72"
+        stroke="rgba(180,220,255,0.7)"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 // ─── Globe view ───────────────────────────────────────────────────────────────
 function cloudLonOffset(id: string): number {
   return ((id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 37) - 18) * 0.02;
 }
-
-type SharedNum = { value: number };
 
 function GlobeCloudItem({
   room,
