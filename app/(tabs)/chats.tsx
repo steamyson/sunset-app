@@ -200,6 +200,22 @@ export default function ChatsScreen() {
   const [selectModeForLeave, setSelectModeForLeave] = useState(false);
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
 
+  // Per-cloud refs for measureInWindow (tap-to-zoom overlay, per D-11)
+  const cloudRefsRef = useRef<Record<string, React.RefObject<View | null>>>({});
+
+  // Overlay animation state and animated values (zoom-into-cloud transition, per D-06–D-09)
+  type OverlayTarget = {
+    x: number; y: number; width: number; height: number;
+    room: Room;
+  } | null;
+  const [overlayTarget, setOverlayTarget] = useState<OverlayTarget>(null);
+  const overlayLeft   = useRef(new Animated.Value(0)).current;
+  const overlayTop    = useRef(new Animated.Value(0)).current;
+  const overlayWidth  = useRef(new Animated.Value(0)).current;
+  const overlayHeight = useRef(new Animated.Value(0)).current;
+  const overlayRadius = useRef(new Animated.Value(40)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+
   // Unified zoom: 1 = sky, 0.18-0.55 = globe (deeper zoom at lower values), 0.78+ = return to sky
   const zoomLevel = useRef(new Animated.Value(1)).current;
   const zoomValueRef = useRef(1);
@@ -684,6 +700,30 @@ export default function ChatsScreen() {
     }, [fitCloudsToView])
   );
 
+  // Overlay expansion animation: fires when overlayTarget is set (per D-07)
+  useEffect(() => {
+    if (!overlayTarget) return;
+    const { room } = overlayTarget;
+
+    Animated.parallel([
+      Animated.spring(overlayLeft,   { toValue: 0,  tension: 200, friction: 14, useNativeDriver: false }),
+      Animated.spring(overlayTop,    { toValue: 0,  tension: 200, friction: 14, useNativeDriver: false }),
+      Animated.spring(overlayWidth,  { toValue: W,  tension: 200, friction: 14, useNativeDriver: false }),
+      Animated.spring(overlayHeight, { toValue: H,  tension: 200, friction: 14, useNativeDriver: false }),
+      Animated.spring(overlayRadius, { toValue: 16, tension: 200, friction: 14, useNativeDriver: false }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        const unread = unreadRooms.has(room.code);
+        router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+        // Dismiss overlay after navigation takes over
+        setTimeout(() => {
+          overlayOpacity.setValue(0);
+          setOverlayTarget(null);
+        }, 300);
+      }
+    });
+  }, [overlayTarget]);
+
   // Callbacks for pan responder (tap vs long-press vs drag)
   const onTapRef     = useRef<(room: Room) => void>(() => {});
   const onOptionsRef = useRef<(room: Room) => void>(() => {});
@@ -840,8 +880,31 @@ export default function ChatsScreen() {
         map[room.code] = false;
         setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
       });
-      const unread = unreadRooms.has(room.code);
-      router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+
+      // Measure cloud screen position for overlay animation (per D-07, D-11)
+      const cloudRef = cloudRefsRef.current[room.id];
+      if (cloudRef?.current) {
+        cloudRef.current.measureInWindow((mx, my, mw, mh) => {
+          if (mw === 0 || mh === 0) {
+            // Fallback: measureInWindow returned zeros (Pitfall 1) — plain push
+            const unread = unreadRooms.has(room.code);
+            router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+            return;
+          }
+          // Initialize overlay at cloud's measured frame
+          overlayLeft.setValue(mx);
+          overlayTop.setValue(my);
+          overlayWidth.setValue(mw);
+          overlayHeight.setValue(mh);
+          overlayRadius.setValue(40);
+          overlayOpacity.setValue(1);
+          setOverlayTarget({ x: mx, y: my, width: mw, height: mh, room });
+        });
+      } else {
+        // No ref — fallback to plain push
+        const unread = unreadRooms.has(room.code);
+        router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+      }
     }
   }
 
@@ -994,6 +1057,10 @@ export default function ChatsScreen() {
                 if (!anims) return null;
                 const pr = getOrCreateCloudPanResponder(room, anims, cw);
                 const cloudScale = cloudScalesRef.current[room.id] ?? new Animated.Value(1);
+                // Ensure per-cloud ref exists for measureInWindow on tap (per D-11)
+                if (!cloudRefsRef.current[room.id]) {
+                  cloudRefsRef.current[room.id] = React.createRef<View>();
+                }
                 return (
                   <Animated.View
                     key={room.id}
@@ -1014,6 +1081,7 @@ export default function ChatsScreen() {
                         zIndex: liftedRoomId === room.id ? 20 : 1,
                       }}>
                         <SkyCloud
+                          ref={cloudRefsRef.current[room.id]}
                           name={nicknames[room.code] ?? room.code}
                           width={cw}
                           unread={unreadRooms.has(room.code)}
@@ -1354,6 +1422,33 @@ export default function ChatsScreen() {
             )}
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Zoom-into-cloud overlay (tap transition, per D-06–D-09) */}
+      <Modal
+        transparent={true}
+        statusBarTranslucent={true}
+        visible={overlayTarget !== null}
+        animationType="none"
+        onRequestClose={() => {
+          overlayOpacity.setValue(0);
+          setOverlayTarget(null);
+        }}
+      >
+        <View style={{ flex: 1, backgroundColor: "transparent" }}>
+          <Animated.View
+            style={{
+              position: "absolute",
+              left: overlayLeft,
+              top: overlayTop,
+              width: overlayWidth,
+              height: overlayHeight,
+              borderRadius: overlayRadius,
+              backgroundColor: "#FFFDF8",
+              opacity: overlayOpacity,
+            }}
+          />
+        </View>
       </Modal>
 
       {/* Rename modal */}
