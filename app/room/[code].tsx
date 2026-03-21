@@ -53,7 +53,7 @@ const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const styles = StyleSheet.create({
   roomWrapper: {
     flex: 1,
-    backgroundColor: "#F8F8FF",
+    backgroundColor: "#FFFDF8",  // warm white — matches cloud fill and overlay color per D-10
   },
   cloudLayer: {
     ...StyleSheet.absoluteFillObject,
