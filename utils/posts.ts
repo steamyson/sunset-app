@@ -105,7 +105,11 @@ export async function getPostsForRoom(roomId: string): Promise<Post[]> {
     .order("created_at", { ascending: false });
 
   if (error) {
-    throw new Error(error.message);
+    // Gracefully return empty array if table doesn't exist yet in schema cache
+    if (!error.message.includes("schema cache") && !error.message.includes("does not exist")) {
+      console.error("getPostsForRoom:", error.message);
+    }
+    return [];
   }
 
   return (data ?? []) as Post[];
