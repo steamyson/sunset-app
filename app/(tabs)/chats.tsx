@@ -706,15 +706,17 @@ export default function ChatsScreen() {
     const { room } = overlayTarget;
 
     Animated.parallel([
-      Animated.spring(overlayLeft,   { toValue: 0,  tension: 200, friction: 14, useNativeDriver: false }),
-      Animated.spring(overlayTop,    { toValue: 0,  tension: 200, friction: 14, useNativeDriver: false }),
-      Animated.spring(overlayWidth,  { toValue: W,  tension: 200, friction: 14, useNativeDriver: false }),
-      Animated.spring(overlayHeight, { toValue: H,  tension: 200, friction: 14, useNativeDriver: false }),
-      Animated.spring(overlayRadius, { toValue: 16, tension: 200, friction: 14, useNativeDriver: false }),
+      Animated.spring(overlayLeft,   { toValue: 0,  tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(overlayTop,    { toValue: 0,  tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(overlayWidth,  { toValue: W,  tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(overlayHeight, { toValue: H,  tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(overlayRadius, { toValue: 16, tension: 65, friction: 22, useNativeDriver: false }),
     ]).start(({ finished }) => {
       if (finished) {
         const unread = unreadRooms.has(room.code);
-        router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+        const { x: ox, y: oy, width: ow, height: oh } = overlayTarget!;
+        const extraParams = `ox=${Math.round(ox)}&oy=${Math.round(oy)}&ow=${Math.round(ow)}&oh=${Math.round(oh)}`;
+        router.push(`/room/${room.code}?${unread ? "unread=true&" : ""}${extraParams}`);
         // Dismiss overlay after navigation takes over
         setTimeout(() => {
           overlayOpacity.setValue(0);
