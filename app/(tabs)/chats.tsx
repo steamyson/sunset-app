@@ -701,7 +701,7 @@ export default function ChatsScreen() {
   );
 
   // Camera-zoom toward cloud: scale the sky canvas up from the cloud's screen center, then navigate
-  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number) {
+  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number, cloudFrame?: { x: number; y: number; w: number; h: number }) {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
     // Hide the name label immediately so it doesn't scale up with the cloud.
@@ -728,7 +728,12 @@ export default function ChatsScreen() {
       if (finished) {
         const unread = unreadRooms.has(room.code);
         // Small delay lets the final animation frame render before the new screen mounts.
-        setTimeout(() => router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`), 50);
+        setTimeout(() => {
+          const qp: string[] = [];
+          if (unread) qp.push("unread=true");
+          if (cloudFrame) qp.push(`ox=${cloudFrame.x}`, `oy=${cloudFrame.y}`, `ow=${cloudFrame.w}`, `oh=${cloudFrame.h}`);
+          router.push(`/room/${room.code}${qp.length ? "?" + qp.join("&") : ""}`);
+        }, 50);
       }
     });
   }
@@ -920,7 +925,7 @@ export default function ChatsScreen() {
           // Zoom toward cloud center
           const cloudCX = mx + mw / 2;
           const cloudCY = my + mh / 2;
-          zoomIntoCloud(room, cloudCX, cloudCY);
+          zoomIntoCloud(room, cloudCX, cloudCY, { x: mx, y: my, w: mw, h: mh });
         });
       } else {
         // No ref — fallback to plain push

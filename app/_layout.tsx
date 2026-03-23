@@ -51,7 +51,7 @@ export default function RootLayout() {
           name="camera"
           options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }}
         />
-        <Stack.Screen name="room/[code]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="room/[code]" options={{ animation: "none" }} />
       </Stack>
       {showIntro && <SunriseIntro onFinish={() => setShowIntro(false)} />}
     </View>
