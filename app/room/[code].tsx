@@ -13,6 +13,7 @@ import {
   Easing,
   FlatList,
   Image,
+  BackHandler,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -129,9 +130,12 @@ export default function RoomThread() {
   const exitHeight = useRef(new Animated.Value(SCREEN_H)).current;
   const exitRadius = useRef(new Animated.Value(16)).current;
   const exitOpacity = useRef(new Animated.Value(0)).current;
+  const isExitingRef = useRef(false);
 
-  function handleBack() {
-    if (!originFrame) { router.back(); return; }
+  const handleBack = useCallback(() => {
+    if (isExitingRef.current) return true; // prevent double-fire
+    isExitingRef.current = true;
+    if (!originFrame) { router.back(); return true; }
     // Show overlay at full-screen, then spring it down to the cloud's origin frame
     exitLeft.setValue(0);
     exitTop.setValue(0);
@@ -148,7 +152,14 @@ export default function RoomThread() {
     ]).start(({ finished }) => {
       if (finished) { router.back(); }
     });
-  }
+    return true; // prevent Android default back
+  }, [originFrame, exitLeft, exitTop, exitWidth, exitHeight, exitRadius, exitOpacity]);
+
+  // Intercept Android hardware back to prevent default (animation completes before router.back)
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", handleBack);
+    return () => sub.remove();
+  }, [handleBack]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [nickname, setNickname] = useState<string | null>(null);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
