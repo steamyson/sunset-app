@@ -109,8 +109,46 @@ function formatCountdown(expiresAtISO: string): string {
 }
 
 export default function RoomThread() {
-  const params = useLocalSearchParams<{ code: string; unread?: string }>();
+  const params = useLocalSearchParams<{ code: string; unread?: string; ox?: string; oy?: string; ow?: string; oh?: string }>();
   const code = params.code;
+
+  // Origin cloud frame (passed from chats.tsx for reverse-exit animation)
+  const originFrame = (
+    params.ox != null && params.oy != null && params.ow != null && params.oh != null
+  ) ? {
+    x: parseFloat(params.ox),
+    y: parseFloat(params.oy),
+    w: parseFloat(params.ow),
+    h: parseFloat(params.oh),
+  } : null;
+
+  // Reverse-exit overlay animated values (full-screen → cloud frame on back)
+  const exitLeft   = useRef(new Animated.Value(0)).current;
+  const exitTop    = useRef(new Animated.Value(0)).current;
+  const exitWidth  = useRef(new Animated.Value(SCREEN_W)).current;
+  const exitHeight = useRef(new Animated.Value(SCREEN_H)).current;
+  const exitRadius = useRef(new Animated.Value(16)).current;
+  const exitOpacity = useRef(new Animated.Value(0)).current;
+
+  function handleBack() {
+    if (!originFrame) { router.back(); return; }
+    // Show overlay at full-screen, then spring it down to the cloud's origin frame
+    exitLeft.setValue(0);
+    exitTop.setValue(0);
+    exitWidth.setValue(SCREEN_W);
+    exitHeight.setValue(SCREEN_H);
+    exitRadius.setValue(16);
+    exitOpacity.setValue(1);
+    Animated.parallel([
+      Animated.spring(exitLeft,   { toValue: originFrame.x, tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(exitTop,    { toValue: originFrame.y, tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(exitWidth,  { toValue: originFrame.w, tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(exitHeight, { toValue: originFrame.h, tension: 65, friction: 22, useNativeDriver: false }),
+      Animated.spring(exitRadius, { toValue: 40,            tension: 65, friction: 22, useNativeDriver: false }),
+    ]).start(({ finished }) => {
+      if (finished) { router.back(); }
+    });
+  }
   const [messages, setMessages] = useState<Message[]>([]);
   const [nickname, setNickname] = useState<string | null>(null);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
@@ -440,7 +478,7 @@ export default function RoomThread() {
   }, []);
 
   return (
-    <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <ParticleTrail style={{ backgroundColor: "#FFFDF8" }}>
     <View style={styles.roomWrapper}>
       {/* Sunset flash overlay (one-time when unread) */}
       <View
@@ -490,11 +528,7 @@ export default function RoomThread() {
           duration={50000}
         />
       </View>
-      {/* Top gradient */}
-      <View
-        style={[styles.topGradient]}
-        pointerEvents="none"
-      />
+      {/* Top gradient intentionally removed — room background is uniform warm white (#FFFDF8) */}
     <SafeAreaView style={{ flex: 1 }}>
       {/* Header with view toggle */}
       <View style={{
@@ -503,7 +537,7 @@ export default function RoomThread() {
         borderBottomWidth: 1, borderBottomColor: colors.mist,
       }}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleBack}
           style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 12 }}
         >
           <Text style={{ fontSize: 20, color: colors.charcoal }}>←</Text>
@@ -897,6 +931,21 @@ export default function RoomThread() {
         </View>
       )}
     </Modal>
+
+    {/* Reverse-exit overlay: warm-white shape shrinks back to cloud origin on back press */}
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        left: exitLeft,
+        top: exitTop,
+        width: exitWidth,
+        height: exitHeight,
+        borderRadius: exitRadius,
+        backgroundColor: "#FFFDF8",
+        opacity: exitOpacity,
+      }}
+    />
 
     </ParticleTrail>
   );
