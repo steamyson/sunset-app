@@ -698,12 +698,13 @@ export default function ChatsScreen() {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
     const targetScale = 4.5;
-    // Anchor the scale to the cloud center: translate so cloud center stays on screen center
-    // With transforms [translateX, translateY, scale]: scale is applied after translate in RN
-    // To keep point (cloudCX, cloudCY) centered after scaling from origin:
-    // tx = W/2 - cloudCX * targetScale, ty = H/2 - cloudCY * targetScale
-    const tx = W / 2 - cloudCX * targetScale;
-    const ty = H / 2 - cloudCY * targetScale;
+    // Anchor the scale to the cloud center: translate so cloud center stays on screen center.
+    // RN transforms pivot around the view's center (W/2, H/2), not the origin.
+    // A point currently at screen (cloudCX, cloudCY) maps to (W/2, H/2) when:
+    //   tx = (W/2 - cloudCX) * targetScale
+    //   ty = (H/2 - cloudCY) * targetScale
+    const tx = (W / 2 - cloudCX) * targetScale;
+    const ty = (H / 2 - cloudCY) * targetScale;
 
     tapZoomTX.setValue(0);
     tapZoomTY.setValue(0);
@@ -726,10 +727,13 @@ export default function ChatsScreen() {
     useCallback(() => {
       if (isTapZoomingRef.current) {
         isTapZoomingRef.current = false;
+        // Use ease-out timing (not spring) to avoid overshoot on large tx/ty values.
+        // A bouncy spring from tx=-2000 back to 0 oscillates the canvas off-screen.
+        const returnCfg = { duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: false };
         Animated.parallel([
-          Animated.spring(tapZoomScale, { toValue: 1, tension: 120, friction: 8, useNativeDriver: false }),
-          Animated.spring(tapZoomTX,    { toValue: 0, tension: 120, friction: 8, useNativeDriver: false }),
-          Animated.spring(tapZoomTY,    { toValue: 0, tension: 120, friction: 8, useNativeDriver: false }),
+          Animated.timing(tapZoomScale, { toValue: 1, ...returnCfg }),
+          Animated.timing(tapZoomTX,    { toValue: 0, ...returnCfg }),
+          Animated.timing(tapZoomTY,    { toValue: 0, ...returnCfg }),
         ]).start();
       }
     }, [tapZoomScale, tapZoomTX, tapZoomTY])
