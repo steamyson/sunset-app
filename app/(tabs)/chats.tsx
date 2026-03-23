@@ -209,6 +209,12 @@ export default function ChatsScreen() {
   const tapZoomTY    = useRef(new Animated.Value(0)).current;
   const isTapZoomingRef = useRef(false);
 
+  // Measured center of the sky canvas container in screen coordinates.
+  // Updated via onLayout + measureInWindow so it is accurate on both iOS and Android
+  // regardless of status-bar / tab-bar geometry.
+  const canvasContainerRef = useRef<View>(null);
+  const canvasPivotRef = useRef({ x: W / 2, y: H / 2 });
+
   // Unified zoom: 1 = sky, 0.18-0.55 = globe (deeper zoom at lower values), 0.78+ = return to sky
   const zoomLevel = useRef(new Animated.Value(1)).current;
   const zoomValueRef = useRef(1);
@@ -697,23 +703,24 @@ export default function ChatsScreen() {
   function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number) {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
-    const targetScale = 4.5;
+    const targetScale = 12;
     // Anchor the scale to the cloud center: translate so cloud center stays on screen center.
-    // RN transforms pivot around the view's center (W/2, H/2), not the origin.
-    // A point currently at screen (cloudCX, cloudCY) maps to (W/2, H/2) when:
-    //   tx = (W/2 - cloudCX) * targetScale
-    //   ty = (H/2 - cloudCY) * targetScale
-    const tx = (W / 2 - cloudCX) * targetScale;
-    const ty = (H / 2 - cloudCY) * targetScale;
+    // RN scales the Animated.View around its own geometric center (the center of its rendered
+    // bounds on screen). We measure this pivot via canvasContainerRef.measureInWindow() on layout
+    // so it is accurate on both iOS and Android regardless of status-bar / tab-bar geometry.
+    const pivotX = canvasPivotRef.current.x;
+    const pivotY = canvasPivotRef.current.y;
+    const tx = (pivotX - cloudCX) * targetScale;
+    const ty = (pivotY - cloudCY) * targetScale;
 
     tapZoomTX.setValue(0);
     tapZoomTY.setValue(0);
     tapZoomScale.setValue(1);
 
     Animated.parallel([
-      Animated.timing(tapZoomScale, { toValue: targetScale, duration: 550, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
-      Animated.timing(tapZoomTX,    { toValue: tx,          duration: 550, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
-      Animated.timing(tapZoomTY,    { toValue: ty,          duration: 550, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(tapZoomScale, { toValue: targetScale, duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(tapZoomTX,    { toValue: tx,          duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(tapZoomTY,    { toValue: ty,          duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
     ]).start(({ finished }) => {
       if (finished) {
         const unread = unreadRooms.has(room.code);
@@ -722,19 +729,18 @@ export default function ChatsScreen() {
     });
   }
 
-  // Reset tap-zoom when chats screen regains focus (after returning from room)
+  // Reset tap-zoom when chats screen regains focus (after returning from room).
+  // Use setValue() for an immediate synchronous reset rather than a timed animation.
+  // The scene view unmounts while loading=true (setLoading(true) fires on focus), so a
+  // 350ms timing animation is unreliable — the Animated.View may not exist yet when the
+  // animation resolves. Snapping to identity before the scene remounts is always correct.
   useFocusEffect(
     useCallback(() => {
       if (isTapZoomingRef.current) {
         isTapZoomingRef.current = false;
-        // Use ease-out timing (not spring) to avoid overshoot on large tx/ty values.
-        // A bouncy spring from tx=-2000 back to 0 oscillates the canvas off-screen.
-        const returnCfg = { duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: false };
-        Animated.parallel([
-          Animated.timing(tapZoomScale, { toValue: 1, ...returnCfg }),
-          Animated.timing(tapZoomTX,    { toValue: 0, ...returnCfg }),
-          Animated.timing(tapZoomTY,    { toValue: 0, ...returnCfg }),
-        ]).start();
+        tapZoomScale.setValue(1);
+        tapZoomTX.setValue(0);
+        tapZoomTY.setValue(0);
       }
     }, [tapZoomScale, tapZoomTX, tapZoomTY])
   );
@@ -1002,7 +1008,14 @@ export default function ChatsScreen() {
         {/* Scene — full area (behind header), position absolute */}
         {!loading && rooms.length > 0 && (
           <View
-            onLayout={(e) => { skyHeightRef.current = e.nativeEvent.layout.height; }}
+            ref={canvasContainerRef}
+            onLayout={(e) => {
+              skyHeightRef.current = e.nativeEvent.layout.height;
+              // Measure actual screen position so zoomIntoCloud can use the true pivot.
+              canvasContainerRef.current?.measureInWindow((x, y, w, h) => {
+                canvasPivotRef.current = { x: x + w / 2, y: y + h / 2 };
+              });
+            }}
             style={{
               position: "absolute",
               top: 0, left: 0, right: 0, bottom: 0,
