@@ -112,10 +112,11 @@ type CloudProps = {
   unread?: boolean;
   lifted?: boolean;
   variant?: number;
+  hideLabel?: boolean;
 };
 
 export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
-  { name, width, unread, lifted, variant = 0 },
+  { name, width, unread, lifted, variant = 0, hideLabel = false },
   ref
 ) {
   const height = width * ASPECT;
@@ -170,6 +171,7 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
           left: 0, right: 0,
           alignItems: "center",
           paddingHorizontal: width * 0.1,
+          opacity: hideLabel ? 0 : 1,
         }}>
           <Text
             numberOfLines={1}

@@ -208,6 +208,7 @@ export default function ChatsScreen() {
   const tapZoomTX    = useRef(new Animated.Value(0)).current;
   const tapZoomTY    = useRef(new Animated.Value(0)).current;
   const isTapZoomingRef = useRef(false);
+  const [zoomingRoomId, setZoomingRoomId] = useState<string | null>(null);
 
   // Measured center of the sky canvas container in screen coordinates.
   // Updated via onLayout + measureInWindow so it is accurate on both iOS and Android
@@ -703,7 +704,9 @@ export default function ChatsScreen() {
   function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number) {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
-    const targetScale = 12;
+    // Hide the name label immediately so it doesn't scale up with the cloud.
+    setZoomingRoomId(room.id);
+    const targetScale = 25;
     // Anchor the scale to the cloud center: translate so cloud center stays on screen center.
     // RN scales the Animated.View around its own geometric center (the center of its rendered
     // bounds on screen). We measure this pivot via canvasContainerRef.measureInWindow() on layout
@@ -724,7 +727,8 @@ export default function ChatsScreen() {
     ]).start(({ finished }) => {
       if (finished) {
         const unread = unreadRooms.has(room.code);
-        router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`);
+        // Small delay lets the final animation frame render before the new screen mounts.
+        setTimeout(() => router.push(`/room/${room.code}${unread ? "?unread=true" : ""}`), 50);
       }
     });
   }
@@ -742,6 +746,7 @@ export default function ChatsScreen() {
         tapZoomTX.setValue(0);
         tapZoomTY.setValue(0);
       }
+      setZoomingRoomId(null);
     }, [tapZoomScale, tapZoomTX, tapZoomTY])
   );
 
@@ -1115,6 +1120,7 @@ export default function ChatsScreen() {
                           unread={unreadRooms.has(room.code)}
                           lifted={liftedRoomId === room.id}
                           variant={roomVariant(room.code)}
+                          hideLabel={zoomingRoomId === room.id}
                         />
                       </View>
                     </Animated.View>
