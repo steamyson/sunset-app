@@ -4,19 +4,38 @@ import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
 import { getItem, setItem } from "./storage";
 import { getExpiresAt } from "./sunset";
+import { getDeviceId } from "./device";
+import { base64ToArrayBuffer } from "./encoding";
 
 const REPORTS_STORAGE_KEY = "dusk_reported_message_ids";
 
 export async function reportMessage(messageId: string): Promise<void> {
+  const deviceId = await getDeviceId();
   const raw = await getItem(REPORTS_STORAGE_KEY);
   const ids: string[] = raw ? JSON.parse(raw) : [];
-  if (!ids.includes(messageId)) {
-    ids.push(messageId);
-    await setItem(REPORTS_STORAGE_KEY, JSON.stringify(ids));
+  if (!ids.includes(messageId)) ids.push(messageId);
+  await setItem(REPORTS_STORAGE_KEY, JSON.stringify(ids));
+
+  const { error } = await supabase.rpc("report_message", {
+    p_message_id: messageId,
+    p_reporter_device_id: deviceId,
+  });
+  if (error) {
+    // Keep local fallback so the report still hides content on this device.
+    console.warn("reportMessage rpc failed", error.message);
   }
 }
 
 export async function getReportedMessageIds(): Promise<Set<string>> {
+  const deviceId = await getDeviceId();
+  const { data, error } = await supabase
+    .from("reports")
+    .select("message_id")
+    .eq("reporter_device_id", deviceId);
+  if (!error && data) {
+    return new Set(data.map((row) => row.message_id as string));
+  }
+
   const raw = await getItem(REPORTS_STORAGE_KEY);
   return new Set(raw ? JSON.parse(raw) : []);
 }
@@ -59,15 +78,6 @@ async function getLocation(): Promise<{ lat: number; lng: number } | null> {
   } catch {
     return null;
   }
-}
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }
 
 async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
@@ -167,13 +177,16 @@ export async function fetchMessagesWithLocation(opts: {
   deviceId: string;
   roomIds: string[];
   mode: "mine" | "rooms";
+  range?: { from: number; to: number };
 }): Promise<Message[]> {
+  const range = opts.range ?? { from: 0, to: 49 };
   let query = supabase
     .from("messages")
     .select("*")
     .not("lat", "is", null)
     .not("lng", "is", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(range.from, range.to);
 
   if (opts.mode === "mine") {
     query = query.eq("sender_device_id", opts.deviceId);
@@ -187,7 +200,10 @@ export async function fetchMessagesWithLocation(opts: {
   return (data ?? []) as Message[];
 }
 
-export async function fetchRoomMessagesByCode(code: string): Promise<Message[]> {
+export async function fetchRoomMessagesByCode(
+  code: string,
+  range: { from: number; to: number } = { from: 0, to: 99 }
+): Promise<Message[]> {
   // Fetch the room first
   const { data: room, error: roomErr } = await supabase
     .from("rooms")
@@ -206,13 +222,17 @@ export async function fetchRoomMessagesByCode(code: string): Promise<Message[]> 
     .select("*")
     .eq("room_id", room.id)
     .gte("created_at", cutoff)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .range(range.from, range.to);
 
   if (error) throw new Error(error.message);
   return (data ?? []) as Message[];
 }
 
-export async function fetchAllMyMessages(roomIds: string[]): Promise<Message[]> {
+export async function fetchAllMyMessages(
+  roomIds: string[],
+  range: { from: number; to: number } = { from: 0, to: 99 }
+): Promise<Message[]> {
   if (!roomIds.length) return [];
   const cutoff = new Date(Date.now() - EXPIRY_MS).toISOString();
 
@@ -221,7 +241,8 @@ export async function fetchAllMyMessages(roomIds: string[]): Promise<Message[]> 
     .select("*")
     .in("room_id", roomIds)
     .gte("created_at", cutoff)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(range.from, range.to);
 
   if (error) throw new Error(error.message);
   return (data ?? []) as Message[];

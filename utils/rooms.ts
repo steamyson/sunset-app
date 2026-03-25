@@ -27,9 +27,12 @@ export async function addLocalRoomCode(code: string) {
 export async function createRoom(): Promise<Room> {
   const deviceId = await getDeviceId();
   let code = generateCode();
+  const MAX_CODE_RETRIES = 10;
+  let attempts = 0;
 
   // Retry until unique
-  while (true) {
+  while (attempts < MAX_CODE_RETRIES) {
+    attempts += 1;
     const { data: existing } = await supabase
       .from("rooms")
       .select("id")
@@ -38,6 +41,9 @@ export async function createRoom(): Promise<Room> {
 
     if (!existing) break;
     code = generateCode();
+  }
+  if (attempts >= MAX_CODE_RETRIES) {
+    throw new Error("Unable to generate a unique room code. Please try again.");
   }
 
   const { data, error } = await supabase
@@ -57,27 +63,16 @@ export async function joinRoom(code: string): Promise<Room> {
   const deviceId = await getDeviceId();
   const upperCode = code.trim().toUpperCase();
 
-  const { data: room, error: fetchError } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("code", upperCode)
-    .maybeSingle();
-
-  if (fetchError) throw new Error(fetchError.message);
+  const { data: room, error } = await supabase.rpc("join_room_by_code", {
+    p_code: upperCode,
+    p_device_id: deviceId,
+  });
+  if (error) throw new Error(error.message);
   if (!room) throw new Error("Room not found. Check the code and try again.");
-
-  if (!room.members.includes(deviceId)) {
-    const { error: updateError } = await supabase
-      .from("rooms")
-      .update({ members: [...room.members, deviceId] })
-      .eq("code", upperCode);
-
-    if (updateError) throw new Error(updateError.message);
-  }
 
   await addLocalRoomCode(upperCode);
   await assignDefaultRoomNickname(upperCode);
-  return { ...room, members: [...room.members, deviceId] } as Room;
+  return room as Room;
 }
 
 export async function fetchMyRooms(): Promise<Room[]> {
@@ -107,18 +102,11 @@ export async function leaveRoom(code: string): Promise<void> {
   const deviceId = await getDeviceId();
   const upperCode = code.toUpperCase();
 
-  const { data: room } = await supabase
-    .from("rooms")
-    .select("members")
-    .eq("code", upperCode)
-    .maybeSingle();
-
-  if (room) {
-    await supabase
-      .from("rooms")
-      .update({ members: room.members.filter((id: string) => id !== deviceId) })
-      .eq("code", upperCode);
-  }
+  const { error } = await supabase.rpc("leave_room_by_code", {
+    p_code: upperCode,
+    p_device_id: deviceId,
+  });
+  if (error) throw new Error(error.message);
 
   await removeLocalRoomCode(upperCode);
 }

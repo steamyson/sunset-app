@@ -46,15 +46,18 @@ import { MessageOverlay, type VisibleMessage } from "../../components/MessageOve
 import { ChatInputBar } from "../../components/ChatInputBar";
 import { sendMessage, type ChatMessage } from "../../utils/messages";
 import * as Location from "expo-location";
+import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../../utils/cameraFlow";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
+const ROOM_CHAT_PAGE_SIZE = 40;
+const ROOM_POST_PAGE_SIZE = 12;
 
 const styles = StyleSheet.create({
   roomWrapper: {
     flex: 1,
-    backgroundColor: "#FFFDF8",  // warm white — matches cloud fill and overlay color per D-10
+    backgroundColor: colors.warmWhite,  // warm white — matches cloud fill and overlay color per D-10
   },
   cloudLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -65,7 +68,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: SCREEN_H * 0.25,
-    backgroundColor: "#DCF0FF",
+    backgroundColor: colors.skyGlow,
     opacity: 0.18,
   },
   sunsetTop: {
@@ -74,7 +77,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: SCREEN_H * 0.5,
-    backgroundColor: "#FF6B35",
+    backgroundColor: colors.sunsetTop,
   },
   sunsetBottom: {
     position: "absolute",
@@ -82,13 +85,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: SCREEN_H * 0.5,
-    backgroundColor: "#FFD166",
+    backgroundColor: colors.sunsetBottom,
   },
 });
-
-const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
-const FLASH_ICON: Record<string, "flash-off" | "flash"> = { off: "flash-off", on: "flash", auto: "flash" };
-const FLASH_LABEL: Record<string, string> = { off: "Off", on: "On", auto: "Auto" };
 
 type PostWithUrl = Post & { signedUrl: string | null };
 
@@ -166,6 +165,7 @@ export default function RoomThread() {
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<"feed" | "chat">("feed");
 
@@ -173,7 +173,11 @@ export default function RoomThread() {
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [posts, setPosts] = useState<PostWithUrl[]>([]);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [visibleMessages, setVisibleMessages] = useState<VisibleMessage[]>([]);
+  const [chatHasMore, setChatHasMore] = useState(true);
+  const [chatLoadingMore, setChatLoadingMore] = useState(false);
 
   // ─── In-room camera ───────────────────────────────────────────────────────
   const [showCamera, setShowCamera]       = useState(false);
@@ -245,7 +249,7 @@ export default function RoomThread() {
   function closeCamera() { resetCamera(); setShowCamera(false); }
 
   function cycleFlash() {
-    setFlash((prev) => FLASH_CYCLE[(FLASH_CYCLE.indexOf(prev) + 1) % FLASH_CYCLE.length]);
+    setFlash((prev) => nextFlashMode(prev));
   }
 
   async function takePicture() {
@@ -301,9 +305,14 @@ export default function RoomThread() {
     }
   }
 
-  async function loadFeed() {
+  async function loadFeed(reset = true) {
     if (!code) return;
-    setFeedLoading(true);
+    if (!reset && (!feedHasMore || feedLoadingMore)) return;
+    if (reset) {
+      setFeedLoading(true);
+    } else {
+      setFeedLoadingMore(true);
+    }
     setFeedError(null);
     try {
       const { data: room, error: roomErr } = await supabase
@@ -315,64 +324,98 @@ export default function RoomThread() {
       if (roomErr) throw new Error(roomErr.message);
       if (!room) throw new Error("Room not found.");
 
-      const rawPosts = await getPostsForRoom(room.id);
+      const from = reset ? 0 : posts.length;
+      const rawPosts = await getPostsForRoom(room.id, {
+        from,
+        to: from + ROOM_POST_PAGE_SIZE - 1,
+      });
       roomIdRef.current = room.id;
-      const mapped: PostWithUrl[] = [];
-      for (const p of rawPosts) {
-        const { data, error: urlErr } = await supabase.storage
-          .from("post-media")
-          .createSignedUrl(p.media_url, 3600);
-        if (urlErr) {
-          console.error("Failed to create signed URL for post", p.id, urlErr);
-          mapped.push({ ...p, signedUrl: null });
-        } else {
-          mapped.push({ ...p, signedUrl: data.signedUrl });
-        }
-      }
-      setPosts(mapped);
+      const mapped: PostWithUrl[] = await Promise.all(
+        rawPosts.map(async (p) => {
+          const { data, error: urlErr } = await supabase.storage
+            .from("post-media")
+            .createSignedUrl(p.media_url, 3600);
+          if (urlErr) {
+            console.error("Failed to create signed URL for post", p.id, urlErr);
+            return { ...p, signedUrl: null };
+          }
+          return { ...p, signedUrl: data.signedUrl };
+        })
+      );
+      setPosts((prev) => {
+        if (reset) return mapped;
+        const existing = new Set(prev.map((p) => p.id));
+        return [...prev, ...mapped.filter((p) => !existing.has(p.id))];
+      });
+      setFeedHasMore(rawPosts.length === ROOM_POST_PAGE_SIZE);
     } catch (e: any) {
       console.error(e);
       setFeedError(e.message ?? "Something went wrong.");
     } finally {
-      setFeedLoading(false);
+      if (reset) {
+        setFeedLoading(false);
+      } else {
+        setFeedLoadingMore(false);
+      }
+    }
+  }
+
+  async function loadMessages(reset = true) {
+    if (!reset && (!chatHasMore || chatLoadingMore)) return;
+    if (reset) {
+      setLoading(true);
+      setLoadError(null);
+    } else {
+      setChatLoadingMore(true);
+    }
+    try {
+      const from = reset ? 0 : messages.length;
+      const [msgs, nick, deviceId, reported] = await Promise.all([
+        fetchRoomMessagesByCode(code, { from, to: from + ROOM_CHAT_PAGE_SIZE - 1 }),
+        getRoomNickname(code),
+        getDeviceId(),
+        getReportedMessageIds(),
+      ]);
+      const filtered = msgs.filter((m) => !reported.has(m.id));
+      const sorted = [...filtered].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      const merged = reset
+        ? sorted
+        : [...messages, ...sorted.filter((m) => !messages.some((prev) => prev.id === m.id))];
+      const uniqueIds = [...new Set(merged.map((m) => m.sender_device_id))];
+      const messageIds = merged.map((m) => m.id);
+      const [names, rxns] = await Promise.all([
+        getNicknames(uniqueIds),
+        fetchReactions(messageIds),
+      ]);
+      setMessages(merged);
+      setNickname(nick);
+      setMyDeviceId(deviceId);
+      setSenderNames(names);
+      setReactions(rxns);
+      setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
+      setLastSeen(code).catch(() => {});
+    } catch (e: any) {
+      console.error(e);
+      if (reset) {
+        setLoadError(e.message ?? "Failed to load room messages.");
+      }
+    } finally {
+      if (reset) {
+        setLoading(false);
+      } else {
+        setChatLoadingMore(false);
+      }
     }
   }
 
   useFocusEffect(
     useCallback(() => {
-      async function load() {
-        try {
-          const [msgs, nick, deviceId, reported] = await Promise.all([
-            fetchRoomMessagesByCode(code),
-            getRoomNickname(code),
-            getDeviceId(),
-            getReportedMessageIds(),
-          ]);
-          const filtered = msgs.filter((m) => !reported.has(m.id));
-          const sorted = [...filtered].sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
-          const uniqueIds = [...new Set(filtered.map((m) => m.sender_device_id))];
-          const messageIds = filtered.map((m) => m.id);
-          const [names, rxns] = await Promise.all([
-            getNicknames(uniqueIds),
-            fetchReactions(messageIds),
-          ]);
-          setMessages(sorted);
-          setNickname(nick);
-          setMyDeviceId(deviceId);
-          setSenderNames(names);
-          setReactions(rxns);
-          setLastSeen(code).catch(() => {});
-        } catch (e) {
-          console.error(e);
-        } finally {
-          setLoading(false);
-        }
-      }
-      setLoading(true);
-      load();
-      loadFeed();
+      setChatHasMore(true);
+      setFeedHasMore(true);
+      loadMessages(true);
+      loadFeed(true);
     }, [code])
   );
 
@@ -419,18 +462,6 @@ export default function RoomThread() {
 
   const sunsetTopOpacity = sunsetAnim;
   const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout | undefined;
-    if (posts.length > 0) {
-      timer = setInterval(() => {
-        setPosts((prev) => [...prev]);
-      }, 1000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [posts.length]);
 
   // Supabase realtime: floating overlay for incoming chat messages
   useEffect(() => {
@@ -489,7 +520,7 @@ export default function RoomThread() {
   }, []);
 
   return (
-    <ParticleTrail style={{ backgroundColor: "#FFFDF8" }}>
+    <ParticleTrail style={{ backgroundColor: colors.warmWhite }}>
     <View style={styles.roomWrapper}>
       {/* Sunset flash overlay (one-time when unread) */}
       <View
@@ -539,7 +570,7 @@ export default function RoomThread() {
           duration={50000}
         />
       </View>
-      {/* Top gradient intentionally removed — room background is uniform warm white (#FFFDF8) */}
+      {/* Top gradient intentionally removed — room background is uniform warm white */}
     <SafeAreaView style={{ flex: 1 }}>
       {/* Header with view toggle */}
       <View style={{
@@ -714,12 +745,34 @@ export default function RoomThread() {
                       backgroundColor: "rgba(0,0,0,0.55)",
                     }}
                   >
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: "white" }}>
-                      {formatCountdown(item.expires_at)}
-                    </Text>
+                    <ExpiryCountdown expiresAtISO={item.expires_at} />
                   </View>
                 </View>
               )}
+              ListFooterComponent={
+                feedHasMore ? (
+                  <View style={{ width: SCREEN_W, alignItems: "center", justifyContent: "center", paddingVertical: 22 }}>
+                    <TouchableOpacity
+                      onPress={() => loadFeed(false)}
+                      disabled={feedLoadingMore}
+                      style={{
+                        backgroundColor: colors.charcoal,
+                        borderRadius: 20,
+                        paddingHorizontal: 18,
+                        paddingVertical: 10,
+                        minWidth: 124,
+                        alignItems: "center",
+                      }}
+                    >
+                      {feedLoadingMore ? (
+                        <ActivityIndicator color={colors.cream} size="small" />
+                      ) : (
+                        <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : null
+              }
             />
 
             {/* Floating overlay and input for feed view */}
@@ -778,6 +831,24 @@ export default function RoomThread() {
         )
       ) : loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+      ) : loadError ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
+          <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
+            Couldn&apos;t load this room
+          </Text>
+          <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+            {loadError}
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setChatHasMore(true);
+              loadMessages(true);
+            }}
+            style={{ marginTop: 14, backgroundColor: colors.charcoal, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 10 }}
+          >
+            <Text style={{ color: colors.cream, fontWeight: "700" }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
       ) : messages.length === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
           <Text style={{ fontSize: 52 }}>🌄</Text>
@@ -807,6 +878,28 @@ export default function RoomThread() {
                 onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
               />
             ))}
+            {chatHasMore && (
+              <View style={{ alignItems: "center", marginTop: 4 }}>
+                <TouchableOpacity
+                  onPress={() => loadMessages(false)}
+                  disabled={chatLoadingMore}
+                  style={{
+                    backgroundColor: colors.charcoal,
+                    borderRadius: 20,
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    minWidth: 124,
+                    alignItems: "center",
+                  }}
+                >
+                  {chatLoadingMore ? (
+                    <ActivityIndicator color={colors.cream} size="small" />
+                  ) : (
+                    <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </ScrollView>
       )}
@@ -953,13 +1046,27 @@ export default function RoomThread() {
         width: exitWidth,
         height: exitHeight,
         borderRadius: exitRadius,
-        backgroundColor: "#FFFDF8",
+        backgroundColor: colors.warmWhite,
         opacity: exitOpacity,
       }}
     />
 
     </ParticleTrail>
   );
+}
+
+function ExpiryCountdown({ expiresAtISO }: { expiresAtISO: string }) {
+  const [label, setLabel] = useState(() => formatCountdown(expiresAtISO));
+
+  useEffect(() => {
+    setLabel(formatCountdown(expiresAtISO));
+    const timer = setInterval(() => {
+      setLabel(formatCountdown(expiresAtISO));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAtISO]);
+
+  return <Text style={{ fontSize: 13, fontWeight: "700", color: "white" }}>{label}</Text>;
 }
 
 function MessageBubble({

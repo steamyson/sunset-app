@@ -11,9 +11,31 @@ import { Text } from "./Text";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../utils/theme";
 
-// TODO: re-enable pixel crop after EAS native build
-async function cropImage(uri: string, _crop: { originX: number; originY: number; width: number; height: number }): Promise<string> {
-  return uri;
+type ImageManipulatorModule = typeof import("expo-image-manipulator");
+let imageManipulatorModulePromise: Promise<ImageManipulatorModule | null> | null = null;
+
+async function getImageManipulatorModule(): Promise<ImageManipulatorModule | null> {
+  if (!imageManipulatorModulePromise) {
+    imageManipulatorModulePromise = import("expo-image-manipulator").catch((error) => {
+      console.warn("expo-image-manipulator unavailable, using uncropped image fallback", error);
+      return null;
+    });
+  }
+  return imageManipulatorModulePromise;
+}
+
+async function cropImage(
+  uri: string,
+  crop: { originX: number; originY: number; width: number; height: number }
+): Promise<string> {
+  const imageManipulator = await getImageManipulatorModule();
+  if (!imageManipulator) return uri;
+  const result = await imageManipulator.manipulateAsync(
+    uri,
+    [{ crop }],
+    { compress: 0.9, format: imageManipulator.SaveFormat.JPEG }
+  );
+  return result.uri;
 }
 
 const SW = Dimensions.get("window").width;

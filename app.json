@@ -23,11 +23,6 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyD5zuKDvgpxzRlEHoDV4FH8HA15EyZaOo0"
-        }
-      },
       "package": "com.akivagroener.dusk"
     },
     "web": {

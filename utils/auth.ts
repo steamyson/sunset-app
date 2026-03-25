@@ -5,7 +5,11 @@ import { assignDefaultRoomNickname } from "./nicknames";
 import * as Linking from "expo-linking";
 import type { User } from "@supabase/supabase-js";
 
-try { require("expo-web-browser").maybeCompleteAuthSession(); } catch {}
+try {
+  require("expo-web-browser").maybeCompleteAuthSession();
+} catch (error) {
+  console.warn("maybeCompleteAuthSession unavailable", error);
+}
 
 export async function signInWithEmail(email: string): Promise<void> {
   const { error } = await supabase.auth.signInWithOtp({
@@ -45,7 +49,7 @@ export async function restoreRoomsForUser(userId: string): Promise<number> {
 
   if (!devices?.length) return 0;
 
-  const deviceIds = devices.map((d: any) => d.device_id);
+  const deviceIds = devices.map((d: { device_id: string }) => d.device_id);
 
   const { data: rooms } = await supabase
     .from("rooms")

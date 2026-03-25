@@ -3,8 +3,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Animated,
-  Easing,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -13,7 +11,6 @@ import {
   Pressable,
   Dimensions,
 } from "react-native";
-
 const { width: W, height: H } = Dimensions.get("window");
 import { Text } from "../components/Text";
 import { useEffect, useRef, useState } from "react";
@@ -24,6 +21,7 @@ import { getLocalNickname, syncDeviceToSupabase } from "../utils/identity";
 import { getDeviceId } from "../utils/device";
 import { colors } from "../utils/theme";
 import { CloudCard } from "../components/CloudCard";
+import { SunGlow, useSunGlowAnimation } from "../components/SunGlow";
 
 async function syncIdentity() {
   const [deviceId, nickname] = await Promise.all([getDeviceId(), getLocalNickname()]);
@@ -35,23 +33,7 @@ export default function EntryScreen() {
   const [loading, setLoading] = useState<"create" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
-  const glowAnim = useRef(new Animated.Value(0.5)).current;
-  const pulseScale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(glowAnim, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(glowAnim, { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-      ])
-    ).start();
-  }, []);
+  const { glowAnim, pulseScale } = useSunGlowAnimation();
 
   async function handleCreate() {
     setError(null);
@@ -96,64 +78,30 @@ export default function EntryScreen() {
     <>
       <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1, backgroundColor: "#FFF8F0" }}
+      style={{ flex: 1, backgroundColor: colors.paperPeach }}
     >
       <View style={{ flex: 1, alignItems: "center", paddingHorizontal: 28, paddingTop: H * 0.22 }}>
 
-        {/* Sunset glow rays spreading down from the sun */}
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 1.6, height: H * 0.72,
-          borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
-          backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
-        }} />
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 1.15, height: H * 0.58,
-          borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
-          backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
-        }} />
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 0.85, height: H * 0.44,
-          borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
-          backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
-        }} />
-
-        {/* Sun — center at top edge, bottom half visible */}
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: "absolute", top: -170, alignSelf: "center",
-            transform: [{ scale: pulseScale }],
-          }}
-        >
-          {/* Outer pastel glow */}
-          <Animated.View style={{
-            width: 340, height: 340, borderRadius: 170,
-            backgroundColor: "#FFFDE7", opacity: glowAnim,
-          }} />
-          {/* Mid glow */}
-          <View style={{
-            position: "absolute", width: 250, height: 250, borderRadius: 125,
-            backgroundColor: "#FFF9C4", opacity: 0.88,
-            left: 45, top: 45,
-          }} />
-          {/* Core */}
-          <View style={{
-            position: "absolute", width: 150, height: 150, borderRadius: 75,
-            backgroundColor: "#FFF59D",
-            left: 95, top: 95,
-            shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 1, shadowRadius: 28, elevation: 14,
-          }} />
-          {/* Highlight */}
-          <View style={{
-            position: "absolute", width: 28, height: 28, borderRadius: 14,
-            backgroundColor: "#FFFDE7", opacity: 0.9,
-            left: 116, top: 110,
-          }} />
-        </Animated.View>
+        <SunGlow
+          width={W}
+          height={H}
+          glowAnim={glowAnim}
+          pulseScale={pulseScale}
+          rayOuterHeightFactor={0.72}
+          rayMidHeightFactor={0.58}
+          rayInnerHeightFactor={0.44}
+          rayOuterOpacity={0.18}
+          rayMidOpacity={0.13}
+          rayInnerOpacity={0.22}
+          sunOuterSize={340}
+          sunMidSize={250}
+          sunCoreSize={150}
+          sunHighlightSize={28}
+          sunMidOffset={45}
+          sunCoreOffset={95}
+          sunHighlightOffsetX={116}
+          sunHighlightOffsetY={110}
+        />
 
         {/* Title */}
         <View style={{ marginBottom: 32, alignItems: "center", zIndex: 1 }}>

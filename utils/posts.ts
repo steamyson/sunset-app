@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "./supabase";
 import { getExpiresAt } from "./sunset";
+import { base64ToArrayBuffer } from "./encoding";
 
 export type Post = {
   id: string;
@@ -22,15 +23,6 @@ type CreatePostParams = {
   caption?: string;
   location: { lat: number; lng: number };
 };
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
 
 async function uploadToPostMediaBucket(localUri: string, roomId: string, deviceId: string): Promise<string> {
   const ext = ".jpg"; // camera flow already uses JPEG
@@ -95,14 +87,18 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
   }
 }
 
-export async function getPostsForRoom(roomId: string): Promise<Post[]> {
+export async function getPostsForRoom(
+  roomId: string,
+  range: { from: number; to: number } = { from: 0, to: 49 }
+): Promise<Post[]> {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from("posts")
     .select("*")
     .eq("room_id", roomId)
     .gt("expires_at", nowIso)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(range.from, range.to);
 
   if (error) {
     // Gracefully return empty array if table doesn't exist yet in schema cache

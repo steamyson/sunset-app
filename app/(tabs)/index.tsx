@@ -5,8 +5,6 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
-  Animated,
-  Easing,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -31,65 +29,70 @@ import { ReactionBar } from "../../components/ReactionBar";
 import { FilteredImage } from "../../components/FilteredImage";
 import { colors, cloudShape } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
+import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 
 const SCREEN_W = W;
+const FEED_PAGE_SIZE = 30;
 
 export default function FeedScreen() {
-  const glowAnim   = useRef(new Animated.Value(0.5)).current;
-  const pulseScale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 1,    duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1,   duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-      ])
-    ).start();
-  }, []);
+  const { glowAnim, pulseScale } = useSunGlowAnimation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [deviceId, setDeviceId] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const roomIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     getDeviceId().then((id) => setDeviceId(id ?? ""));
   }, []);
 
-  async function load() {
+  async function load(reset = true) {
+    if (!reset && (loadingMore || !hasMore)) return;
+    if (!reset) setLoadingMore(true);
     try {
+      setLoadError(null);
       const rooms = await fetchMyRooms();
       const roomIds = rooms.map((r) => r.id);
+      roomIdsRef.current = roomIds;
+      const from = reset ? 0 : messages.length;
+      const range = { from, to: from + FEED_PAGE_SIZE - 1 };
       const [msgs, sunset, reported, myDeviceId] = await Promise.all([
-        fetchAllMyMessages(roomIds),
+        fetchAllMyMessages(roomIds, range),
         fetchSunsetTime(),
         getReportedMessageIds(),
         getDeviceId(),
       ]);
       const filtered = msgs.filter((m) => !reported.has(m.id));
-      setMessages(filtered);
+      const merged = reset
+        ? filtered
+        : [...messages, ...filtered.filter((m) => !messages.some((prev) => prev.id === m.id))];
+      setMessages(merged);
+      setHasMore(filtered.length === FEED_PAGE_SIZE);
       if (sunset) setSunsetLabel(sunset.formattedLocal);
       if (myDeviceId) setDeviceId(myDeviceId);
 
-      const uniqueSenders = [...new Set(filtered.map((m) => m.sender_device_id))];
-      const ids = filtered.map((m) => m.id);
+      const uniqueSenders = [...new Set(merged.map((m) => m.sender_device_id))];
+      const ids = merged.map((m) => m.id);
       const [names, rxns] = await Promise.all([
         getNicknames(uniqueSenders),
         fetchReactions(ids),
       ]);
       setSenderNames(names);
       setReactions(rxns);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setLoadError(e?.message ?? "Could not load your feed.");
     } finally {
-      setLoading(false);
+      if (reset) {
+        setLoading(false);
+      } else {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -125,47 +128,38 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
-      load();
+      setHasMore(true);
+      load(true);
     }, [])
   );
+
+  function loadMore() {
+    load(false);
+  }
 
   return (
     <ParticleTrail style={{ backgroundColor: colors.sky }}>
 
-      {/* ── Sunset glow rays ── */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.6, height: H * 0.55,
-        borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
-        backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.15, height: H * 0.42,
-        borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
-        backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 0.85, height: H * 0.30,
-        borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
-        backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
-      }} />
-
-      {/* ── Sun ── */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: -155, alignSelf: "center",
-        transform: [{ scale: pulseScale }],
-      }}>
-        <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
-        <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
-        <View style={{
-          position: "absolute", width: 140, height: 140, borderRadius: 70,
-          backgroundColor: "#FFF59D", left: 85, top: 85,
-          shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
-        }} />
-        <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
-      </Animated.View>
+      <SunGlow
+        width={W}
+        height={H}
+        glowAnim={glowAnim}
+        pulseScale={pulseScale}
+        rayOuterHeightFactor={0.55}
+        rayMidHeightFactor={0.42}
+        rayInnerHeightFactor={0.30}
+        rayOuterOpacity={0.18}
+        rayMidOpacity={0.13}
+        rayInnerOpacity={0.22}
+        sunOuterSize={310}
+        sunMidSize={230}
+        sunCoreSize={140}
+        sunHighlightSize={26}
+        sunMidOffset={40}
+        sunCoreOffset={85}
+        sunHighlightOffsetX={106}
+        sunHighlightOffsetY={100}
+      />
 
       <SafeAreaView style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
@@ -201,6 +195,25 @@ export default function FeedScreen() {
 
         {loading ? (
           <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+        ) : loadError ? (
+          <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
+              Couldn&apos;t load your feed
+            </Text>
+            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+              {loadError}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setLoading(true);
+                setHasMore(true);
+                load(true);
+              }}
+              style={{ marginTop: 16, backgroundColor: colors.charcoal, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 }}
+            >
+              <Text style={{ color: colors.cream, fontWeight: "700" }}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
         ) : messages.length === 0 ? (
           <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
             <Text style={{ fontSize: 64 }}>🌅</Text>
@@ -224,6 +237,28 @@ export default function FeedScreen() {
                 onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
               />
             ))}
+            {hasMore && (
+              <View style={{ alignItems: "center", marginTop: 4 }}>
+                <TouchableOpacity
+                  onPress={loadMore}
+                  disabled={loadingMore}
+                  style={{
+                    backgroundColor: colors.charcoal,
+                    borderRadius: 20,
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    minWidth: 124,
+                    alignItems: "center",
+                  }}
+                >
+                  {loadingMore ? (
+                    <ActivityIndicator color={colors.cream} size="small" />
+                  ) : (
+                    <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>

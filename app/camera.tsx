@@ -24,15 +24,7 @@ import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils
 import { getDeviceId } from "../utils/device";
 import { colors } from "../utils/theme";
 import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime } from "../utils/sunset";
-
-const FLASH_CYCLE: FlashMode[] = ["off", "on", "auto"];
-const FLASH_ICON: Record<FlashMode, "flash-off" | "flash"> = {
-  off: "flash-off",
-  on: "flash",
-  auto: "flash",
-  screen: "flash",
-};
-const FLASH_LABEL: Record<FlashMode, string> = { off: "Off", on: "On", auto: "Auto", screen: "Screen" };
+import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../utils/cameraFlow";
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -58,15 +50,12 @@ export default function CameraScreen() {
       if (!info) { setGoldenHour("open"); return; }
       setSunsetLabel(info.formattedLocal);
       setWindowOpensLabel(formatSunsetTime(goldenHourWindowStart(info.sunsetTime)));
-      setGoldenHour("open"); // TODO: re-enable: isWithinGoldenHour(info.sunsetTime) ? "open" : "closed"
+      setGoldenHour(isWithinGoldenHour(info.sunsetTime) ? "open" : "closed");
     });
   }, []);
 
   function cycleFlash() {
-    setFlash((prev) => {
-      const idx = FLASH_CYCLE.indexOf(prev);
-      return FLASH_CYCLE[(idx + 1) % FLASH_CYCLE.length];
-    });
+    setFlash((prev) => nextFlashMode(prev));
   }
 
   async function takePicture() {

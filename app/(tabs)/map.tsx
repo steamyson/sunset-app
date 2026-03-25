@@ -33,6 +33,7 @@ import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
 
 const SCREEN_W = Dimensions.get("window").width;
+const MAP_PAGE_SIZE = 100;
 
 type MapMode = "mine" | "rooms";
 
@@ -307,7 +308,7 @@ function NativeMap({ messages, myCoords }: {
                   borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2,
                   marginTop: 3,
                   minWidth: 20, alignItems: "center",
-                  shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+                  shadowColor: colors.pureBlack, shadowOffset: { width: 0, height: 1 },
                   shadowOpacity: 0.3, shadowRadius: 2, elevation: 3,
                 }}>
                   <Text style={{ color: "white", fontSize: 11, fontWeight: "800", lineHeight: 14 }}>
@@ -337,7 +338,7 @@ function NativeMap({ messages, myCoords }: {
           width: 44, height: 44, borderRadius: 22,
           backgroundColor: colors.cream,
           alignItems: "center", justifyContent: "center",
-          shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+          shadowColor: colors.pureBlack, shadowOffset: { width: 0, height: 2 },
           shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
         }}
       >
@@ -354,32 +355,40 @@ export default function MapScreen() {
   const [myCoords, setMyCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationDenied, setLocationDenied] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-
-      async function load() {
-        setLoading(true);
+      setLoading(true);
+      setLoadError(null);
+      setHasMore(true);
+      (async () => {
         try {
           const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRooms()]);
           if (cancelled) return;
           const roomIds = rooms.map((r) => r.id);
-
-          const msgs = await fetchMessagesWithLocation({ deviceId, roomIds, mode });
+          const msgs = await fetchMessagesWithLocation({
+            deviceId,
+            roomIds,
+            mode,
+            range: { from: 0, to: MAP_PAGE_SIZE - 1 },
+          });
           if (cancelled) return;
           setMessages(msgs);
+          setHasMore(msgs.length === MAP_PAGE_SIZE);
         } catch (e) {
           console.error(e);
+          if (!cancelled) setLoadError("Could not load map sunsets right now.");
         } finally {
           if (!cancelled) setLoading(false);
         }
 
-        // Location runs after map is already visible
         try {
           const locResult = await Location.requestForegroundPermissionsAsync();
           if (cancelled) return;
-
           if (locResult.status === "granted") {
             setLocationDenied(false);
             try {
@@ -387,19 +396,15 @@ export default function MapScreen() {
               if (!cancelled) {
                 setMyCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
               }
-            } catch {
-              // GPS unavailable — map still works, just no user dot
-            }
+            } catch {}
           } else {
             setLocationDenied(true);
           }
-        } catch {
-          // Location permission error — non-fatal
-        }
-      }
-
-      load();
-      return () => { cancelled = true; };
+        } catch {}
+      })();
+      return () => {
+        cancelled = true;
+      };
     }, [mode])
   );
 
@@ -465,6 +470,66 @@ export default function MapScreen() {
           <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>
             {messages.length} sunset{messages.length !== 1 ? "s" : ""} captured here
           </Text>
+        </View>
+      )}
+
+      {!loading && loadError && (
+        <CloudCard seed={5} style={{ position: "absolute", bottom: 20, alignSelf: "center", maxWidth: 300 }}>
+          <View style={{ paddingHorizontal: 20, paddingVertical: 14, alignItems: "center" }}>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
+              {loadError}
+            </Text>
+            <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4, textAlign: "center" }}>
+              Switch tabs and return to retry.
+            </Text>
+          </View>
+        </CloudCard>
+      )}
+
+      {!loading && !loadError && hasMore && (
+        <View style={{ position: "absolute", bottom: 76, alignSelf: "center" }}>
+          <TouchableOpacity
+            onPress={() => {
+              setLoadingMore(true);
+              (async () => {
+                try {
+                  const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRooms()]);
+                  const roomIds = rooms.map((r) => r.id);
+                  const from = messages.length;
+                  const next = await fetchMessagesWithLocation({
+                    deviceId,
+                    roomIds,
+                    mode,
+                    range: { from, to: from + MAP_PAGE_SIZE - 1 },
+                  });
+                  setMessages((prev) => {
+                    const existing = new Set(prev.map((m) => m.id));
+                    return [...prev, ...next.filter((m) => !existing.has(m.id))];
+                  });
+                  setHasMore(next.length === MAP_PAGE_SIZE);
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setLoadingMore(false);
+                }
+              })();
+            }}
+            disabled={loadingMore}
+            style={{
+              backgroundColor: colors.charcoal,
+              borderRadius: 20,
+              paddingHorizontal: 18,
+              paddingVertical: 10,
+              minWidth: 124,
+              alignItems: "center",
+            }}
+          >
+            {loadingMore ? (
+              <ActivityIndicator color={colors.cream} size="small" />
+            ) : (
+              <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
+            )}
+          </TouchableOpacity>
         </View>
       )}
     </View>

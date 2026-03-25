@@ -8,14 +8,12 @@ import {
   TextInput,
   Modal,
   Alert,
-  Animated,
-  Easing,
   Dimensions,
   Image,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   type Avatar,
   PRESET_AVATARS,
@@ -43,29 +41,14 @@ import {
 } from "../../utils/notifications";
 import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
+import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 
 import type { Room } from "../../utils/supabase";
 
 const { width: W, height: H } = Dimensions.get("window");
 
 export default function ProfileScreen() {
-  const glowAnim   = useRef(new Animated.Value(0.5)).current;
-  const pulseScale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 1,    duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1,   duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-      ])
-    ).start();
-  }, []);
+  const { glowAnim, pulseScale } = useSunGlowAnimation();
 
   const [alias, setAlias] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -164,11 +147,7 @@ export default function ProfileScreen() {
 
   async function handlePickPhoto() {
     try {
-      const ImagePicker = require("expo-image-picker");
-      if (!ImagePicker?.requestMediaLibraryPermissionsAsync) {
-        Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
-        return;
-      }
+      const ImagePicker = await import("expo-image-picker");
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permission needed", "Allow photo access to set a profile picture.");
@@ -294,40 +273,26 @@ export default function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.sky }}>
 
-      {/* ── Sunset glow rays ── */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.6, height: H * 0.55,
-        borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
-        backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 1.15, height: H * 0.42,
-        borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
-        backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
-      }} />
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: 0, alignSelf: "center",
-        width: W * 0.85, height: H * 0.30,
-        borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
-        backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
-      }} />
-
-      {/* ── Sun ── */}
-      <Animated.View pointerEvents="none" style={{
-        position: "absolute", top: -155, alignSelf: "center",
-        transform: [{ scale: pulseScale }],
-      }}>
-        <Animated.View style={{ width: 310, height: 310, borderRadius: 155, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
-        <View style={{ position: "absolute", width: 230, height: 230, borderRadius: 115, backgroundColor: "#FFF9C4", opacity: 0.88, left: 40, top: 40 }} />
-        <View style={{
-          position: "absolute", width: 140, height: 140, borderRadius: 70,
-          backgroundColor: "#FFF59D", left: 85, top: 85,
-          shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
-        }} />
-        <View style={{ position: "absolute", width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFDE7", opacity: 0.9, left: 106, top: 100 }} />
-      </Animated.View>
+      <SunGlow
+        width={W}
+        height={H}
+        glowAnim={glowAnim}
+        pulseScale={pulseScale}
+        rayOuterHeightFactor={0.55}
+        rayMidHeightFactor={0.42}
+        rayInnerHeightFactor={0.30}
+        rayOuterOpacity={0.18}
+        rayMidOpacity={0.13}
+        rayInnerOpacity={0.22}
+        sunOuterSize={310}
+        sunMidSize={230}
+        sunCoreSize={140}
+        sunHighlightSize={26}
+        sunMidOffset={40}
+        sunCoreOffset={85}
+        sunHighlightOffsetX={106}
+        sunHighlightOffsetY={100}
+      />
 
       <SafeAreaView style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1, paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>

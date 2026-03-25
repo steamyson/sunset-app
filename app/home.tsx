@@ -12,10 +12,11 @@ import { router } from "expo-router";
 import { fetchSunsetTime } from "../utils/sunset";
 import { getLocalRoomCodes } from "../utils/rooms";
 import { colors } from "../utils/theme";
+import { SunGlow, useSunGlowAnimation } from "../components/SunGlow";
 
 const { width: W, height: H } = Dimensions.get("window");
 
-const SPARK_COLORS = ["#FFE135", "#F5A623", "#E8642A", "#FFF59D", "#FFCC02", "#FFB347"];
+const SPARK_COLORS = [colors.sunShadow, colors.amber, colors.ember, colors.sunCore, colors.sunRayOuter, colors.sunRayMid];
 
 type Particle = {
   id: number;
@@ -106,8 +107,7 @@ const ParticleCanvas = forwardRef<ParticleCanvasHandle>((_, ref) => {
 
 // ─── Main screen ─────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const glowAnim    = useRef(new Animated.Value(0.5)).current;
-  const pulseScale  = useRef(new Animated.Value(1)).current;
+  const { glowAnim, pulseScale } = useSunGlowAnimation();
   const slideAnim   = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const canvasRef   = useRef<ParticleCanvasHandle>(null);
   const navigating  = useRef(false);
@@ -117,22 +117,6 @@ export default function HomeScreen() {
   const [sunsetTime,  setSunsetTime]  = useState<Date | null>(null);
   const [countdown,   setCountdown]   = useState<string | null>(null);
   const [pastSunset,  setPastSunset]  = useState(false);
-
-  // Pulse animation
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 1,    duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1.12, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(glowAnim,   { toValue: 0.5, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(pulseScale, { toValue: 1,   duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-      ])
-    ).start();
-  }, []);
 
   // Sunset fetch + room check
   useEffect(() => {
@@ -203,40 +187,26 @@ export default function HomeScreen() {
         style={{ flex: 1, transform: slideAnim.getTranslateTransform() }}
         {...pan.panHandlers}
       >
-        {/* Glow rays */}
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 1.6, height: H * 0.72,
-          borderBottomLeftRadius: W * 0.8, borderBottomRightRadius: W * 0.8,
-          backgroundColor: "#F5A623", opacity: Animated.multiply(glowAnim, 0.18),
-        }} />
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 1.15, height: H * 0.58,
-          borderBottomLeftRadius: W * 0.6, borderBottomRightRadius: W * 0.6,
-          backgroundColor: "#E8642A", opacity: Animated.multiply(glowAnim, 0.13),
-        }} />
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: 0, alignSelf: "center",
-          width: W * 0.85, height: H * 0.44,
-          borderBottomLeftRadius: W * 0.45, borderBottomRightRadius: W * 0.45,
-          backgroundColor: "#FFF59D", opacity: Animated.multiply(glowAnim, 0.22),
-        }} />
-
-        {/* Sun */}
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", top: -170, alignSelf: "center",
-          transform: [{ scale: pulseScale }],
-        }}>
-          <Animated.View style={{ width: 340, height: 340, borderRadius: 170, backgroundColor: "#FFFDE7", opacity: glowAnim }} />
-          <View style={{ position: "absolute", width: 250, height: 250, borderRadius: 125, backgroundColor: "#FFF9C4", opacity: 0.88, left: 45, top: 45 }} />
-          <View style={{
-            position: "absolute", width: 150, height: 150, borderRadius: 75,
-            backgroundColor: "#FFF59D", left: 95, top: 95,
-            shadowColor: "#FFE135", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 28, elevation: 14,
-          }} />
-          <View style={{ position: "absolute", width: 28, height: 28, borderRadius: 14, backgroundColor: "#FFFDE7", opacity: 0.9, left: 116, top: 110 }} />
-        </Animated.View>
+        <SunGlow
+          width={W}
+          height={H}
+          glowAnim={glowAnim}
+          pulseScale={pulseScale}
+          rayOuterHeightFactor={0.72}
+          rayMidHeightFactor={0.58}
+          rayInnerHeightFactor={0.44}
+          rayOuterOpacity={0.18}
+          rayMidOpacity={0.13}
+          rayInnerOpacity={0.22}
+          sunOuterSize={340}
+          sunMidSize={250}
+          sunCoreSize={150}
+          sunHighlightSize={28}
+          sunMidOffset={45}
+          sunCoreOffset={95}
+          sunHighlightOffsetX={116}
+          sunHighlightOffsetY={110}
+        />
 
         {/* Particles — isolated component, re-renders never bubble up */}
         <ParticleCanvas ref={canvasRef} />

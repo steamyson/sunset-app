@@ -27,10 +27,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 export async function setDeviceSession(deviceId: string): Promise<void> {
   if (!deviceId) return;
   try {
-    // Best-effort: ignore errors so app can still function in degraded mode
     await supabase.rpc("set_device_session", { device_id: deviceId });
-  } catch {
-    // ignore
+  } catch (error) {
+    console.warn("setDeviceSession failed", error);
   }
 }
 
