@@ -10,6 +10,7 @@ import {
   Animated,
   Easing,
   Dimensions,
+  InteractionManager,
   PanResponder,
   StyleSheet,
 } from "react-native";
@@ -36,7 +37,8 @@ import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
 import { getItem, setItem } from "../../utils/storage";
 import { getDeviceId } from "../../utils/device";
-import { fetchMyRooms, leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
+import { leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
+import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
@@ -257,6 +259,9 @@ export default function ChatsScreen() {
   const prevRoomIdsRef = useRef<Set<string>>(new Set());
   // Per-cloud scale animated values for spring scale-in animation on new clouds
   const cloudScalesRef = useRef<Record<string, Animated.Value>>({});
+  const prevRoomIdStringRef = useRef("");
+  const lastFitRoomIdsRef = useRef("");
+  const hasLoadedRef = useRef(false);
 
   // Stop all loops on unmount
   useEffect(() => {
@@ -275,7 +280,7 @@ export default function ChatsScreen() {
   async function load() {
     try {
       const [roomList, nameMap, lastSeenMap] = await Promise.all([
-        fetchMyRooms(),
+        fetchMyRoomsCached(),
         getAllNicknames(),
         getAllLastSeen(),
       ]);
@@ -293,20 +298,22 @@ export default function ChatsScreen() {
       console.error(e);
     } finally {
       setLoading(false);
+      hasLoadedRef.current = true;
     }
   }
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, []));
+  useFocusEffect(useCallback(() => { if (!hasLoadedRef.current) setLoading(true); load(); }, []));
 
   // When Chats screen is focused, clear "currently viewing room" (user came back from room)
   useFocusEffect(useCallback(() => { currentRoomCodeRef.current = null; }, []));
 
+  const roomIdString = rooms.map((room) => room.id).filter(Boolean).join(",");
+
   // Supabase realtime: new photo INSERT → add room to unread if not currently viewing
   useEffect(() => {
     getDeviceId().then((id) => { myDeviceIdRef.current = id; });
-    const roomIds = roomsRef.current.map((room) => room.id).filter(Boolean);
-    const roomFilter = roomIds.length ? `room_id=in.(${roomIds.join(",")})` : null;
-    if (!roomFilter) return;
+    if (!roomIdString) return;
+    const roomFilter = `room_id=in.(${roomIdString})`;
 
     const channel = supabase
       .channel("messages-insert")
@@ -328,7 +335,7 @@ export default function ChatsScreen() {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [rooms.map((room) => room.id).join(",")]);
+  }, [roomIdString]);
 
   // Cloud width — always start at full base size; shrink loop reduces only if actual collisions occur
   const cloudW = useMemo(() => W * 0.54, []);
@@ -390,18 +397,20 @@ export default function ChatsScreen() {
 
   // ─── Cloud bounce animations — start on mount and when rooms change ─────────
   useEffect(() => {
-    // Wait until saved positions have been loaded (or confirmed absent) before laying out
     if (!positionsLoaded) return;
 
     const displayRooms = rooms.slice(0, MAX_VISIBLE_ROOMS);
+    const newIds = displayRooms.map(r => r.id).join(",");
+    if (newIds === prevRoomIdStringRef.current) return;
+    prevRoomIdStringRef.current = newIds;
 
-    // Detect newly added rooms (not in prevRoomIdsRef)
+    const handle = InteractionManager.runAfterInteractions(() => {
+
     const currentRoomIds = new Set(displayRooms.map((r) => r.id));
     const newRoomIds = new Set<string>();
     currentRoomIds.forEach((id) => { if (!prevRoomIdsRef.current.has(id)) newRoomIds.add(id); });
     prevRoomIdsRef.current = currentRoomIds;
 
-    // Reset effective width to full base size; shrink loop will reduce only if collisions occur
     effectiveCwRef.current = cloudW;
 
     // Stop all running loops and clear anims when rooms or count changes
@@ -642,14 +651,24 @@ export default function ChatsScreen() {
     });
     setAnimsReady((n) => n + 1);
     fitCloudsToView();
+    lastFitRoomIdsRef.current = newIds;
+
+    }); // end InteractionManager.runAfterInteractions
+
+    return () => handle.cancel();
   }, [rooms, cloudW, fitCloudsToView, positionsLoaded]);
 
-  // fitCloudsToView on focus, with 300ms delay so screen transition completes first
+  // fitCloudsToView on focus — skip when rooms haven't changed since last fit
   useFocusEffect(
     useCallback(() => {
-      const t = setTimeout(() => fitCloudsToView(), 300);
+      const currentIds = rooms.slice(0, MAX_VISIBLE_ROOMS).map(r => r.id).join(",");
+      if (currentIds === lastFitRoomIdsRef.current) return;
+      const t = setTimeout(() => {
+        fitCloudsToView();
+        lastFitRoomIdsRef.current = currentIds;
+      }, 300);
       return () => clearTimeout(t);
-    }, [fitCloudsToView])
+    }, [fitCloudsToView, rooms])
   );
 
   // Camera-zoom toward cloud: scale the sky canvas up from the cloud's screen center, then navigate
@@ -696,10 +715,7 @@ export default function ChatsScreen() {
   }
 
   // Reset tap-zoom when chats screen regains focus (after returning from room).
-  // Use setValue() for an immediate synchronous reset rather than a timed animation.
-  // The scene view unmounts while loading=true (setLoading(true) fires on focus), so a
-  // 350ms timing animation is unreliable — the Animated.View may not exist yet when the
-  // animation resolves. Snapping to identity before the scene remounts is always correct.
+  // setValue() for an immediate synchronous snap back to identity.
   useFocusEffect(
     useCallback(() => {
       if (isTapZoomingRef.current) {

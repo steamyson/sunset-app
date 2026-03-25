@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // Lazy-load react-native-maps at module level so it's stable across renders
 // and never imported on web where it isn't needed.
@@ -26,7 +26,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { fetchMessagesWithLocation, type Message } from "../../utils/messages";
-import { fetchMyRooms } from "../../utils/rooms";
+import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
 import { colors } from "../../utils/theme";
@@ -221,7 +221,7 @@ function NativeMap({ messages, myCoords }: {
     longitudeDelta: 58,
   };
 
-  const clusters = clusterMessages(messages);
+  const clusters = useMemo(() => clusterMessages(messages), [messages]);
 
   useEffect(() => {
     if (!mapReady || clusters.length === 0 || hasAutoFitRef.current || !mapRef.current) return;
@@ -358,16 +358,17 @@ export default function MapScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      setLoading(true);
+      if (!hasLoadedRef.current) setLoading(true);
       setLoadError(null);
       setHasMore(true);
       (async () => {
         try {
-          const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRooms()]);
+          const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRoomsCached()]);
           if (cancelled) return;
           const roomIds = rooms.map((r) => r.id);
           const msgs = await fetchMessagesWithLocation({
@@ -383,7 +384,10 @@ export default function MapScreen() {
           console.error(e);
           if (!cancelled) setLoadError("Could not load map sunsets right now.");
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) {
+            setLoading(false);
+            hasLoadedRef.current = true;
+          }
         }
 
         try {
@@ -392,6 +396,10 @@ export default function MapScreen() {
           if (locResult.status === "granted") {
             setLocationDenied(false);
             try {
+              const lastKnown = await Location.getLastKnownPositionAsync();
+              if (lastKnown && !cancelled) {
+                setMyCoords({ latitude: lastKnown.coords.latitude, longitude: lastKnown.coords.longitude });
+              }
               const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
               if (!cancelled) {
                 setMyCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
@@ -493,7 +501,7 @@ export default function MapScreen() {
               setLoadingMore(true);
               (async () => {
                 try {
-                  const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRooms()]);
+                  const [deviceId, rooms] = await Promise.all([getDeviceId(), fetchMyRoomsCached()]);
                   const roomIds = rooms.map((r) => r.id);
                   const from = messages.length;
                   const next = await fetchMessagesWithLocation({

@@ -14,6 +14,7 @@ import {
   FlatList,
   Image,
   BackHandler,
+  InteractionManager,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -53,6 +54,10 @@ const SCREEN_H = Dimensions.get("window").height;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const ROOM_CHAT_PAGE_SIZE = 40;
 const ROOM_POST_PAGE_SIZE = 12;
+
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const SIGNED_URL_EXPIRY = 3600;
+const CACHE_BUFFER_MS = 300_000;
 
 const styles = StyleSheet.create({
   roomWrapper: {
@@ -195,6 +200,10 @@ export default function RoomThread() {
   const sunsetAnim = useRef(new Animated.Value(0)).current;
   const roomIdRef = useRef<string | null>(null);
   const locationRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
+  const loadedCodeRef = useRef<string | null>(null);
+  const [overlayRoomId, setOverlayRoomId] = useState<string | null>(null);
+  const [locationMap, setLocationMap] = useState<Record<string, string>>({});
+  const [particlesReady, setParticlesReady] = useState(false);
 
   // Check unread on mount: route param or SecureStore, run sunset flash if unread, then mark read
   useEffect(() => {
@@ -308,9 +317,7 @@ export default function RoomThread() {
   async function loadFeed(reset = true) {
     if (!code) return;
     if (!reset && (!feedHasMore || feedLoadingMore)) return;
-    if (reset) {
-      setFeedLoading(true);
-    } else {
+    if (!reset) {
       setFeedLoadingMore(true);
     }
     setFeedError(null);
@@ -330,18 +337,37 @@ export default function RoomThread() {
         to: from + ROOM_POST_PAGE_SIZE - 1,
       });
       roomIdRef.current = room.id;
-      const mapped: PostWithUrl[] = await Promise.all(
-        rawPosts.map(async (p) => {
-          const { data, error: urlErr } = await supabase.storage
-            .from("post-media")
-            .createSignedUrl(p.media_url, 3600);
-          if (urlErr) {
-            console.error("Failed to create signed URL for post", p.id, urlErr);
-            return { ...p, signedUrl: null };
+      setOverlayRoomId(room.id);
+
+      const now = Date.now();
+      const resolvedUrls = new Map<string, string>();
+      const uncachedPaths: string[] = [];
+      for (const p of rawPosts) {
+        const cached = signedUrlCache.get(p.media_url);
+        if (cached && cached.expiresAt > now + CACHE_BUFFER_MS) {
+          resolvedUrls.set(p.media_url, cached.url);
+        } else {
+          uncachedPaths.push(p.media_url);
+        }
+      }
+      if (uncachedPaths.length > 0) {
+        const { data: signedData } = await supabase.storage
+          .from("post-media")
+          .createSignedUrls(uncachedPaths, SIGNED_URL_EXPIRY);
+        if (signedData) {
+          const expiresAt = now + SIGNED_URL_EXPIRY * 1000;
+          for (const item of signedData) {
+            if (item.signedUrl && item.path) {
+              signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
+              resolvedUrls.set(item.path, item.signedUrl);
+            }
           }
-          return { ...p, signedUrl: data.signedUrl };
-        })
-      );
+        }
+      }
+      const mapped: PostWithUrl[] = rawPosts.map((p) => ({
+        ...p,
+        signedUrl: resolvedUrls.get(p.media_url) ?? null,
+      }));
       setPosts((prev) => {
         if (reset) return mapped;
         const existing = new Set(prev.map((p) => p.id));
@@ -363,7 +389,6 @@ export default function RoomThread() {
   async function loadMessages(reset = true) {
     if (!reset && (!chatHasMore || chatLoadingMore)) return;
     if (reset) {
-      setLoading(true);
       setLoadError(null);
     } else {
       setChatLoadingMore(true);
@@ -396,6 +421,19 @@ export default function RoomThread() {
       setReactions(rxns);
       setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
       setLastSeen(code).catch(() => {});
+
+      const withCoords = merged.filter((m) => m.lat && m.lng);
+      if (withCoords.length > 0) {
+        const geoResults = await Promise.all(
+          withCoords.map(async (m) => ({
+            id: m.id,
+            location: await reverseGeocode(m.lat!, m.lng!),
+          }))
+        );
+        const locMap: Record<string, string> = {};
+        for (const r of geoResults) locMap[r.id] = r.location;
+        setLocationMap(locMap);
+      }
     } catch (e: any) {
       console.error(e);
       if (reset) {
@@ -412,10 +450,18 @@ export default function RoomThread() {
 
   useFocusEffect(
     useCallback(() => {
+      const isNewRoom = loadedCodeRef.current !== code;
+      if (isNewRoom) {
+        setLoading(true);
+        setFeedLoading(true);
+        loadedCodeRef.current = code;
+      }
       setChatHasMore(true);
       setFeedHasMore(true);
       loadMessages(true);
       loadFeed(true);
+      const handle = InteractionManager.runAfterInteractions(() => setParticlesReady(true));
+      return () => { handle.cancel(); setParticlesReady(false); };
     }, [code])
   );
 
@@ -463,19 +509,19 @@ export default function RoomThread() {
   const sunsetTopOpacity = sunsetAnim;
   const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
 
-  // Supabase realtime: floating overlay for incoming chat messages
+  // Supabase realtime: floating overlay for incoming chat messages.
+  // Deferred until both overlayRoomId and myDeviceId are non-null to avoid
+  // a wasted subscribe-then-teardown cycle when either resolves async.
   useEffect(() => {
-    const roomId = roomIdRef.current;
-    if (!roomId) return;
+    if (!overlayRoomId || !myDeviceId) return;
 
     const channel = supabase
       .channel("room-messages-overlay")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
+        { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${overlayRoomId}` },
         (payload: { new: ChatMessage }) => {
           const msg = payload.new;
-          // Ignore messages we sent ourselves (overlay is optimistic for local sends)
           if (msg.device_id === myDeviceId) return;
           const base: VisibleMessage = {
             id: msg.id,
@@ -491,7 +537,7 @@ export default function RoomThread() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [myDeviceId]);
+  }, [overlayRoomId, myDeviceId]);
 
   // Read device location once for message expiry calculations
   useEffect(() => {
@@ -500,6 +546,13 @@ export default function RoomThread() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted" || cancelled) return;
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown && !cancelled) {
+          locationRef.current = {
+            lat: lastKnown.coords.latitude,
+            lng: lastKnown.coords.longitude,
+          };
+        }
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
@@ -520,7 +573,7 @@ export default function RoomThread() {
   }, []);
 
   return (
-    <ParticleTrail style={{ backgroundColor: colors.warmWhite }}>
+    <ParticleTrail style={{ backgroundColor: colors.warmWhite }} disabled={!particlesReady}>
     <View style={styles.roomWrapper}>
       {/* Sunset flash overlay (one-time when unread) */}
       <View
@@ -685,11 +738,7 @@ export default function RoomThread() {
               renderItem={({ item }) => (
                 <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
                   {item.signedUrl ? (
-                    <Image
-                      source={{ uri: item.signedUrl }}
-                      style={{ width: SCREEN_W, height: SCREEN_H - 140 }}
-                      resizeMode="cover"
-                    />
+                    <FeedImage uri={item.signedUrl} />
                   ) : (
                     <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
                       <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
@@ -841,6 +890,7 @@ export default function RoomThread() {
           </Text>
           <TouchableOpacity
             onPress={() => {
+              setLoading(true);
               setChatHasMore(true);
               loadMessages(true);
             }}
@@ -876,6 +926,7 @@ export default function RoomThread() {
                 reactions={reactions[msg.id] ?? {}}
                 deviceId={myDeviceId ?? ""}
                 onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
+                location={locationMap[msg.id] ?? null}
               />
             ))}
             {chatHasMore && (
@@ -1055,22 +1106,46 @@ export default function RoomThread() {
   );
 }
 
+function FeedImage({ uri }: { uri: string }) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const onLoadEnd = useCallback(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [fadeAnim]);
+
+  return (
+    <View style={{ width: SCREEN_W, height: SCREEN_H - 140, backgroundColor: colors.mist }}>
+      <Animated.Image
+        source={{ uri }}
+        style={{ width: SCREEN_W, height: SCREEN_H - 140, opacity: fadeAnim }}
+        resizeMode="cover"
+        onLoadEnd={onLoadEnd}
+      />
+    </View>
+  );
+}
+
 function ExpiryCountdown({ expiresAtISO }: { expiresAtISO: string }) {
   const [label, setLabel] = useState(() => formatCountdown(expiresAtISO));
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    setLabel(formatCountdown(expiresAtISO));
-    const timer = setInterval(() => {
+    function tick() {
       setLabel(formatCountdown(expiresAtISO));
-    }, 1000);
-    return () => clearInterval(timer);
+      const msLeft = new Date(expiresAtISO).getTime() - Date.now();
+      const nextInterval = msLeft < 120_000 ? 1_000 : 60_000;
+      intervalRef.current = setTimeout(tick, nextInterval);
+    }
+    tick();
+    return () => {
+      if (intervalRef.current) clearTimeout(intervalRef.current);
+    };
   }, [expiresAtISO]);
 
   return <Text style={{ fontSize: 13, fontWeight: "700", color: "white" }}>{label}</Text>;
 }
 
 function MessageBubble({
-  message, isMe, displayName, onReport, reactions, deviceId, onReactionUpdate,
+  message, isMe, displayName, onReport, reactions, deviceId, onReactionUpdate, location,
 }: {
   message: Message;
   isMe: boolean;
@@ -1079,19 +1154,13 @@ function MessageBubble({
   reactions: MessageReactions;
   deviceId: string;
   onReactionUpdate: (emoji: string, added: boolean) => void;
+  location: string | null;
 }) {
   const expired = isExpired(message);
   const expiresInH = Math.max(
     0,
     24 - (Date.now() - new Date(message.created_at).getTime()) / 3600000
   );
-  const [location, setLocation] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (message.lat && message.lng) {
-      reverseGeocode(message.lat, message.lng).then(setLocation);
-    }
-  }, [message.id]);
 
   return (
     <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>

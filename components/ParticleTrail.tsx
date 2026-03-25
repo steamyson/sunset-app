@@ -82,13 +82,17 @@ const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
 export function ParticleTrail({
   children,
   style,
+  disabled = false,
 }: {
   children: React.ReactNode;
   style?: ViewStyle;
+  disabled?: boolean;
 }) {
   const canvasRef      = useRef<CanvasHandle>(null);
   const containerRef   = useRef<View>(null);
   const offset         = useRef({ x: 0, y: 0 });
+  const disabledRef    = useRef(disabled);
+  disabledRef.current  = disabled;
 
   function remeasure() {
     containerRef.current?.measureInWindow((x, y) => { offset.current = { x, y }; });
@@ -100,8 +104,8 @@ export function ParticleTrail({
 
   const pan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder:     () => true,
-      onPanResponderTerminationRequest: () => true,  // always yield to inner responders
+      onStartShouldSetPanResponder:     () => !disabledRef.current,
+      onPanResponderTerminationRequest: () => true,
       onPanResponderGrant: (e) => {
         remeasure();
         spawnAt(e.nativeEvent.pageX, e.nativeEvent.pageY);

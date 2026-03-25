@@ -1,4 +1,6 @@
-import { Image, View } from "react-native";
+import { useRef, useCallback } from "react";
+import { View, Animated } from "react-native";
+import { colors } from "../utils/theme";
 import type { FilterName, Adjustments } from "../utils/filters";
 
 type RNFilter =
@@ -63,15 +65,29 @@ interface Props {
 export function FilteredImage({ uri, filter, adjustments, width, height, resizeMode = "cover" }: Props) {
   const name = (filter as FilterName) ?? "original";
   const filters = buildFilters(name, adjustments);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const lastUriRef = useRef("");
 
-  if (filters.length === 0) {
-    return <Image source={{ uri }} style={{ width, height }} resizeMode={resizeMode} />;
+  if (uri !== lastUriRef.current) {
+    lastUriRef.current = uri;
+    fadeAnim.setValue(0);
   }
 
-  // Apply filters on a View wrapper — confirmed supported in RN 0.76+
+  const onLoadEnd = useCallback(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [fadeAnim]);
+
+  if (filters.length === 0) {
+    return (
+      <View style={{ width, height, backgroundColor: colors.mist }}>
+        <Animated.Image source={{ uri }} style={{ width, height, opacity: fadeAnim }} resizeMode={resizeMode} onLoadEnd={onLoadEnd} />
+      </View>
+    );
+  }
+
   return (
-    <View style={[{ width, height, overflow: "hidden" }, { filter: filters } as any]}>
-      <Image source={{ uri }} style={{ width, height }} resizeMode={resizeMode} />
+    <View style={[{ width, height, overflow: "hidden", backgroundColor: colors.mist }, { filter: filters } as any]}>
+      <Animated.Image source={{ uri }} style={{ width, height, opacity: fadeAnim }} resizeMode={resizeMode} onLoadEnd={onLoadEnd} />
     </View>
   );
 }

@@ -30,7 +30,8 @@ import type { User } from "@supabase/supabase-js";
 import { getDeviceId } from "../../utils/device";
 import { fetchSunsetTime } from "../../utils/sunset";
 import { getLocalNickname, setLocalNickname, syncDeviceToSupabase } from "../../utils/identity";
-import { fetchMyRooms, leaveRoom, createRoom } from "../../utils/rooms";
+import { leaveRoom, createRoom } from "../../utils/rooms";
+import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import {
   getAlertsEnabled,
@@ -89,7 +90,7 @@ export default function ProfileScreen() {
           getLocalNickname(),
           getAlertsEnabled(),
           fetchSunsetTime(),
-          fetchMyRooms(),
+          fetchMyRoomsCached(),
           getAllNicknames(),
         ]);
         setDeviceId(id);
@@ -196,7 +197,8 @@ export default function ProfileScreen() {
       if (user) {
         setAuthUser(user);
         setAuthStep("idle");
-        const roomList = await (await import("../../utils/rooms")).fetchMyRooms();
+        invalidateRoomCache();
+        const roomList = await fetchMyRoomsCached();
         const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
         setRooms(roomList);
         setRoomNicknames(nickMap);
@@ -234,7 +236,8 @@ export default function ProfileScreen() {
       setAuthEmail("");
       setAuthToken("");
       if (restored > 0) {
-        const roomList = await (await import("../../utils/rooms")).fetchMyRooms();
+        invalidateRoomCache();
+        const roomList = await fetchMyRoomsCached();
         const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
         setRooms(roomList);
         setRoomNicknames(nickMap);

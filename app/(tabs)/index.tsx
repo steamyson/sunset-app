@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
+  InteractionManager,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,7 +20,7 @@ import {
   timeAgo,
   type Message,
 } from "../../utils/messages";
-import { fetchMyRooms } from "../../utils/rooms";
+import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { fetchSunsetTime } from "../../utils/sunset";
 import { getNicknames } from "../../utils/identity";
 import { getDeviceId } from "../../utils/device";
@@ -46,6 +47,9 @@ export default function FeedScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const roomIdsRef = useRef<string[]>([]);
+  const hasLoadedRef = useRef(false);
+  const [locationMap, setLocationMap] = useState<Record<string, string>>({});
+  const [particlesReady, setParticlesReady] = useState(false);
 
   useEffect(() => {
     getDeviceId().then((id) => setDeviceId(id ?? ""));
@@ -56,7 +60,7 @@ export default function FeedScreen() {
     if (!reset) setLoadingMore(true);
     try {
       setLoadError(null);
-      const rooms = await fetchMyRooms();
+      const rooms = await fetchMyRoomsCached();
       const roomIds = rooms.map((r) => r.id);
       roomIdsRef.current = roomIds;
       const from = reset ? 0 : messages.length;
@@ -84,12 +88,26 @@ export default function FeedScreen() {
       ]);
       setSenderNames(names);
       setReactions(rxns);
+
+      const withCoords = merged.filter((m) => m.lat && m.lng);
+      if (withCoords.length > 0) {
+        const geoResults = await Promise.all(
+          withCoords.map(async (m) => ({
+            id: m.id,
+            location: await reverseGeocode(m.lat!, m.lng!),
+          }))
+        );
+        const locMap: Record<string, string> = {};
+        for (const r of geoResults) locMap[r.id] = r.location;
+        setLocationMap(locMap);
+      }
     } catch (e: any) {
       console.error(e);
       setLoadError(e?.message ?? "Could not load your feed.");
     } finally {
       if (reset) {
         setLoading(false);
+        hasLoadedRef.current = true;
       } else {
         setLoadingMore(false);
       }
@@ -127,9 +145,11 @@ export default function FeedScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
+      if (!hasLoadedRef.current) setLoading(true);
       setHasMore(true);
       load(true);
+      const handle = InteractionManager.runAfterInteractions(() => setParticlesReady(true));
+      return () => { handle.cancel(); setParticlesReady(false); };
     }, [])
   );
 
@@ -138,7 +158,7 @@ export default function FeedScreen() {
   }
 
   return (
-    <ParticleTrail style={{ backgroundColor: colors.sky }}>
+    <ParticleTrail style={{ backgroundColor: colors.sky }} disabled={!particlesReady}>
 
       <SunGlow
         width={W}
@@ -235,6 +255,7 @@ export default function FeedScreen() {
                 deviceId={deviceId}
                 onReport={() => handleReport(msg.id)}
                 onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
+                location={locationMap[msg.id] ?? null}
               />
             ))}
             {hasMore && (
@@ -274,6 +295,7 @@ function PhotoCard({
   deviceId,
   onReport,
   onReactionUpdate,
+  location,
 }: {
   message: Message;
   senderName: string | undefined;
@@ -281,6 +303,7 @@ function PhotoCard({
   deviceId: string;
   onReport: () => void;
   onReactionUpdate: (emoji: string, added: boolean) => void;
+  location: string | null;
 }) {
   const expiresIn = Math.max(
     0,
@@ -288,13 +311,6 @@ function PhotoCard({
   );
   const almostExpired = expiresIn < 3;
   const CARD_W = SCREEN_W - 32;
-
-  const [location, setLocation] = useState<string | null>(null);
-  useEffect(() => {
-    if (message.lat && message.lng) {
-      reverseGeocode(message.lat, message.lng).then(setLocation);
-    }
-  }, [message.id]);
 
   return (
     <View style={{ marginHorizontal: 16, marginBottom: 14 }}>

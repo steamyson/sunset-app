@@ -2,6 +2,7 @@ import { supabase, Room } from "./supabase";
 import { getDeviceId } from "./device";
 import { getItem, setItem } from "./storage";
 import { assignDefaultRoomNickname } from "./nicknames";
+import { invalidateRoomCache } from "./roomCache";
 
 const LOCAL_ROOMS_KEY = "dusk_rooms";
 
@@ -56,6 +57,7 @@ export async function createRoom(): Promise<Room> {
 
   await addLocalRoomCode(code);
   await assignDefaultRoomNickname(code);
+  invalidateRoomCache();
   return data as Room;
 }
 
@@ -72,6 +74,7 @@ export async function joinRoom(code: string): Promise<Room> {
 
   await addLocalRoomCode(upperCode);
   await assignDefaultRoomNickname(upperCode);
+  invalidateRoomCache();
   return room as Room;
 }
 
@@ -109,4 +112,5 @@ export async function leaveRoom(code: string): Promise<void> {
   if (error) throw new Error(error.message);
 
   await removeLocalRoomCode(upperCode);
+  invalidateRoomCache();
 }
