@@ -5,12 +5,19 @@ import {
   ActivityIndicator,
   Platform,
   Dimensions,
+  PanResponder,
+  Animated,
 } from "react-native";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 import { Text } from "../components/Text";
 import { useEffect, useRef, useState } from "react";
-import { CameraView, useCameraPermissions, type FlashMode } from "expo-camera";
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  type PhotoFile,
+} from "react-native-vision-camera";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
@@ -24,12 +31,17 @@ import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils
 import { getDeviceId } from "../utils/device";
 import { colors } from "../utils/theme";
 import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../utils/sunset";
-import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../utils/cameraFlow";
+
+const SLIDER_H = 200;
 
 export default function CameraScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [rawPhoto, setRawPhoto] = useState<string | null>(null);   // URI straight from camera
-  const [photo, setPhoto] = useState<string | null>(null);          // URI after optional crop
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useCameraDevice("back");
+  const deviceRef = useRef(device);
+  deviceRef.current = device;
+
+  const [rawPhoto, setRawPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(null);
   const [showCrop, setShowCrop] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterName>("original");
@@ -37,8 +49,15 @@ export default function CameraScreen() {
   const [showSelector, setShowSelector] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<FlashMode>("off");
-  const cameraRef = useRef<CameraView>(null);
+  const [flash, setFlash] = useState<"off" | "on">("off");
+  const [exposure, setExposure] = useState(0);
+  const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
+  const [showGrid, setShowGrid] = useState(false);
+  const cameraRef = useRef<Camera>(null);
+
+  const sliderY = useRef(new Animated.Value(SLIDER_H / 2)).current;
+  const sliderYRef = useRef(SLIDER_H / 2);
+  const lastTapRef = useRef(0);
 
   // Golden hour gate
   const [goldenHour, setGoldenHour] = useState<"checking" | "open" | "closed">("checking");
@@ -58,16 +77,77 @@ export default function CameraScreen() {
     });
   }, []);
 
+  // Align slider indicator to neutral (exposure=0) when device loads
+  useEffect(() => {
+    if (!device) return;
+    const range = device.maxExposure - device.minExposure;
+    if (range === 0) return;
+    const y = Math.max(0, Math.min(SLIDER_H, ((device.maxExposure - 0) / range) * SLIDER_H));
+    sliderYRef.current = y;
+    sliderY.setValue(y);
+  }, [device]);
+
+  const sliderPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        const now = Date.now();
+        if (now - lastTapRef.current < 300) {
+          // double-tap: reset exposure to 0
+          const d = deviceRef.current;
+          let midY = SLIDER_H / 2;
+          if (d) {
+            const range = d.maxExposure - d.minExposure;
+            if (range !== 0) {
+              midY = Math.max(0, Math.min(SLIDER_H, ((d.maxExposure - 0) / range) * SLIDER_H));
+            }
+          }
+          sliderYRef.current = midY;
+          sliderY.setValue(midY);
+          setExposure(0);
+        }
+        lastTapRef.current = Date.now();
+      },
+      onPanResponderMove: (_e, gs) => {
+        const newY = Math.max(0, Math.min(SLIDER_H, sliderYRef.current + gs.dy));
+        sliderY.setValue(newY);
+        const d = deviceRef.current;
+        if (d) {
+          const t = newY / SLIDER_H;
+          setExposure(d.maxExposure - t * (d.maxExposure - d.minExposure));
+        }
+      },
+      onPanResponderRelease: (_e, gs) => {
+        sliderYRef.current = Math.max(0, Math.min(SLIDER_H, sliderYRef.current + gs.dy));
+      },
+    })
+  ).current;
+
   function cycleFlash() {
-    setFlash((prev) => nextFlashMode(prev));
+    setFlash((prev) => (prev === "off" ? "on" : "off"));
   }
 
   async function takePicture() {
-    const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
-    if (result?.uri) {
-      setRawPhoto(result.uri);
+    if (!cameraRef.current) return;
+    const result: PhotoFile = await cameraRef.current.takePhoto({
+      flash: flash === "off" ? "off" : "on",
+      enableShutterSound: false,
+    });
+    if (result?.path) {
+      const uri = Platform.OS === "android" ? "file://" + result.path : result.path;
+      setRawPhoto(uri);
       setShowCrop(true);
     }
+  }
+
+  async function handleFocus(e: any) {
+    if (!cameraRef.current) return;
+    const point = { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY };
+    setFocusPoint(point);
+    try {
+      await cameraRef.current.focus(point);
+    } catch {}
+    setTimeout(() => setFocusPoint(null), 600);
   }
 
   async function handleSend(roomCodes: string[]) {
@@ -131,13 +211,8 @@ export default function CameraScreen() {
     );
   }
 
-  // No permission info yet
-  if (!permission) {
-    return <View style={{ flex: 1, backgroundColor: "black" }} />;
-  }
-
-  // Permission denied
-  if (!permission.granted) {
+  // Permission not granted
+  if (!hasPermission) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.cream, alignItems: "center", justifyContent: "center", padding: 32 }}>
         <Ionicons name="camera-outline" size={64} color={colors.ember} />
@@ -153,6 +228,20 @@ export default function CameraScreen() {
         >
           <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Allow Camera</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.ash, fontSize: 14 }}>Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // No camera device found
+  if (!device) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.cream, alignItems: "center", justifyContent: "center", padding: 32 }}>
+        <Text style={{ fontSize: 24, fontWeight: "800", color: colors.charcoal, textAlign: "center" }}>
+          No camera found
+        </Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
           <Text style={{ color: colors.ash, fontSize: 14 }}>Go back</Text>
         </TouchableOpacity>
@@ -257,7 +346,47 @@ export default function CameraScreen() {
   // Live camera viewfinder
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
-      <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back" flash={flash} />
+      <View style={{ flex: 1 }} onTouchEnd={handleFocus}>
+        <Camera
+          ref={cameraRef}
+          device={device}
+          isActive={true}
+          photo={true}
+          style={{ flex: 1 }}
+          exposure={exposure}
+          torch={flash === "on" ? "on" : "off"}
+        />
+
+        {/* Rule-of-thirds grid */}
+        {showGrid && (
+          <View
+            pointerEvents="none"
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+          >
+            <View style={{ position: "absolute", left: "33.33%", top: 0, bottom: 0, width: 0.5, backgroundColor: "rgba(255,255,255,0.4)" }} />
+            <View style={{ position: "absolute", left: "66.66%", top: 0, bottom: 0, width: 0.5, backgroundColor: "rgba(255,255,255,0.4)" }} />
+            <View style={{ position: "absolute", top: "33.33%", left: 0, right: 0, height: 0.5, backgroundColor: "rgba(255,255,255,0.4)" }} />
+            <View style={{ position: "absolute", top: "66.66%", left: 0, right: 0, height: 0.5, backgroundColor: "rgba(255,255,255,0.4)" }} />
+          </View>
+        )}
+
+        {/* Tap-to-focus indicator */}
+        {focusPoint && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              left: focusPoint.x - 22,
+              top: focusPoint.y - 22,
+              width: 44,
+              height: 44,
+              borderRadius: 6,
+              borderWidth: 2,
+              borderColor: "white",
+            }}
+          />
+        )}
+      </View>
 
       {/* Close button */}
       <TouchableOpacity
@@ -272,6 +401,19 @@ export default function CameraScreen() {
         <Text style={{ color: "white", fontSize: 18, fontWeight: "600" }}>✕</Text>
       </TouchableOpacity>
 
+      {/* Grid toggle */}
+      <TouchableOpacity
+        onPress={() => setShowGrid((prev) => !prev)}
+        style={{
+          position: "absolute", top: 56, right: 112,
+          width: 44, height: 44, borderRadius: 22,
+          backgroundColor: showGrid ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.45)",
+          alignItems: "center", justifyContent: "center",
+        }}
+      >
+        <Ionicons name="grid-outline" size={20} color="white" />
+      </TouchableOpacity>
+
       {/* Flash toggle */}
       <TouchableOpacity
         onPress={cycleFlash}
@@ -282,9 +424,50 @@ export default function CameraScreen() {
           flexDirection: "row", alignItems: "center", gap: 6,
         }}
       >
-        <Ionicons name={FLASH_ICON[flash]} size={18} color="white" />
-        <Text style={{ color: "white", fontWeight: "700", fontSize: 13 }}>{FLASH_LABEL[flash]}</Text>
+        <Ionicons name={flash === "off" ? "flash-off" : "flash"} size={18} color="white" />
+        <Text style={{ color: "white", fontWeight: "700", fontSize: 13 }}>{flash === "off" ? "Off" : "On"}</Text>
       </TouchableOpacity>
+
+      {/* Exposure slider */}
+      <View
+        style={{
+          position: "absolute",
+          right: 20,
+          top: SH / 2 - SLIDER_H / 2 - 28,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ fontSize: 16, marginBottom: 8 }}>☀️</Text>
+        <View
+          style={{ height: SLIDER_H, width: 40, alignItems: "center" }}
+          {...sliderPanResponder.panHandlers}
+        >
+          <View
+            style={{
+              position: "absolute",
+              width: 2,
+              top: 0,
+              bottom: 0,
+              backgroundColor: "rgba(255,255,255,0.3)",
+              borderRadius: 1,
+            }}
+          />
+          <Animated.View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: "50%",
+              marginLeft: -12,
+              width: 24,
+              height: 24,
+              borderRadius: 12,
+              backgroundColor: "white",
+              transform: [{ translateY: sliderY }],
+            }}
+          />
+        </View>
+        <Text style={{ fontSize: 16, marginTop: 8 }}>🌙</Text>
+      </View>
 
       {/* Shutter button */}
       <View style={{ position: "absolute", bottom: 56, alignSelf: "center", alignItems: "center", justifyContent: "center" }}>

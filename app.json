@@ -38,7 +38,13 @@
           "color": "#E8642A"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Dusk needs camera access to capture sunset photos."
+        }
+      ]
     ],
     "extra": {
       "router": {},
