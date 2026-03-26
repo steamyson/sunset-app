@@ -23,7 +23,7 @@ import { sendPhoto } from "../utils/messages";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils/filters";
 import { getDeviceId } from "../utils/device";
 import { colors } from "../utils/theme";
-import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime } from "../utils/sunset";
+import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../utils/sunset";
 import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../utils/cameraFlow";
 
 export default function CameraScreen() {
@@ -46,6 +46,10 @@ export default function CameraScreen() {
   const [windowOpensLabel, setWindowOpensLabel] = useState<string | null>(null);
 
   useEffect(() => {
+    if (UNLOCK_CAMERA_FOR_TESTING) {
+      setGoldenHour("open");
+      return;
+    }
     fetchSunsetTime().then((info) => {
       if (!info) { setGoldenHour("open"); return; }
       setSunsetLabel(info.formattedLocal);

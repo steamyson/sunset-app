@@ -25,6 +25,9 @@ export function formatSunsetTime(date: Date): string {
 const WINDOW_BEFORE_MS = 90 * 60_000;
 const WINDOW_AFTER_MS = 45 * 60_000;
 
+/** Set to `false` before release — skips golden-hour gate on the main camera screen only. */
+export const UNLOCK_CAMERA_FOR_TESTING = true;
+
 export function isWithinGoldenHour(sunsetTime: Date): boolean {
   const now = Date.now();
   const sunset = sunsetTime.getTime();

@@ -269,32 +269,72 @@ export default function RoomThread() {
   async function handleSend() {
     if (!photo) return;
     setSending(true); setSendError(null);
+    let optimisticId: string | null = null;
     try {
-      const deviceId = await getDeviceId();
-      await sendPhoto({ uri: photo, roomCodes: [code], deviceId, filter: activeFilter, adjustments: activeAdj });
-      // Also create a post record for the new room feed (posts + post-media pipeline)
-      try {
-        const { data: room, error: roomErr } = await supabase
+      const [deviceId, roomRes] = await Promise.all([
+        getDeviceId(),
+        supabase
           .from("rooms")
           .select("id")
           .eq("code", code.toUpperCase())
-          .maybeSingle();
-        if (!roomErr && room) {
-          await createPost({
-            roomId: room.id,
-            roomCode: code,
-            deviceId,
-            mediaUri: photo,
-            // Caption support can be threaded in later; for now, posts have no caption.
-            location: { lat: 0, lng: 0 },
-          });
-        }
-      } catch (e) {
-        console.error("createPost failed", e);
+          .maybeSingle(),
+      ]);
+      const room = roomRes.data;
+      if (roomRes.error) throw new Error(roomRes.error.message);
+      if (!room) throw new Error("Room not found.");
+
+      const now = new Date();
+      const day = now.toISOString().slice(0, 10);
+      optimisticId = `__opt__${Date.now()}`;
+      const optimisticPost: PostWithUrl = {
+        id: optimisticId,
+        room_id: room.id,
+        device_id: deviceId,
+        media_url: "",
+        caption: null,
+        created_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + 24 * 3600000).toISOString(),
+        sunset_date: day,
+        signedUrl: photo,
+      };
+      setPosts((prev) => [optimisticPost, ...prev]);
+
+      const [, createdPost] = await Promise.all([
+        sendPhoto({
+          uri: photo,
+          roomCodes: [code],
+          deviceId,
+          filter: activeFilter,
+          adjustments: activeAdj,
+        }),
+        createPost({
+          roomId: room.id,
+          roomCode: code,
+          deviceId,
+          mediaUri: photo,
+          location: { lat: 0, lng: 0 },
+        }),
+      ]);
+
+      const { data: signRow } = await supabase.storage
+        .from("post-media")
+        .createSignedUrl(createdPost.media_url, SIGNED_URL_EXPIRY);
+      const signed =
+        signRow?.signedUrl ??
+        null;
+      if (signed) {
+        signedUrlCache.set(createdPost.media_url, {
+          url: signed,
+          expiresAt: Date.now() + SIGNED_URL_EXPIRY * 1000,
+        });
       }
+      setPosts((prev) => {
+        const rest = prev.filter((p) => p.id !== optimisticId);
+        return [{ ...createdPost, signedUrl: signed ?? photo }, ...rest];
+      });
+
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeCamera();
-      // Refresh messages so the new photo appears immediately
       const [msgs, reported] = await Promise.all([fetchRoomMessagesByCode(code), getReportedMessageIds()]);
       const filtered = msgs.filter((m) => !reported.has(m.id));
       const sorted = [...filtered].sort(
@@ -309,7 +349,11 @@ export default function RoomThread() {
       setSenderNames(names);
       setReactions(rxns);
     } catch (e: any) {
+      if (optimisticId) {
+        setPosts((prev) => prev.filter((p) => p.id !== optimisticId));
+      }
       setSendError(e.message ?? "Failed to send.");
+    } finally {
       setSending(false);
     }
   }
@@ -1118,6 +1162,7 @@ function FeedImage({ uri }: { uri: string }) {
         source={{ uri }}
         style={{ width: SCREEN_W, height: SCREEN_H - 140, opacity: fadeAnim }}
         resizeMode="cover"
+        {...(Platform.OS === "android" ? { resizeMethod: "resize" as const } : {})}
         onLoadEnd={onLoadEnd}
       />
     </View>

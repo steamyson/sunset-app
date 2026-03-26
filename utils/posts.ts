@@ -53,10 +53,10 @@ async function uploadToPostMediaBucket(localUri: string, roomId: string, deviceI
 export async function createPost(params: CreatePostParams): Promise<Post> {
   const { roomId, deviceId, mediaUri, caption, location } = params;
 
-  const { expires_at, sunset_date } = await getExpiresAt(location.lat, location.lng);
-
-  // 1. Upload to storage
-  const mediaPath = await uploadToPostMediaBucket(mediaUri, roomId, deviceId);
+  const [{ expires_at, sunset_date }, mediaPath] = await Promise.all([
+    getExpiresAt(location.lat, location.lng),
+    uploadToPostMediaBucket(mediaUri, roomId, deviceId),
+  ]);
 
   try {
     // 2. Insert row into posts
