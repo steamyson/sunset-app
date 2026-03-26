@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, type Message, type FeedPhoto } from "../../utils/messages";
+import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, type Message, type FeedPhoto } from "../../utils/messages";
 import { getAlias } from "../../utils/aliases";
 import { getRoomNickname } from "../../utils/nicknames";
 import { getNicknames } from "../../utils/identity";
@@ -43,6 +43,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
 import { createPost, getPostsForRoom, type Post } from "../../utils/posts";
+import { getCache, clearCache } from "../../utils/roomCache";
 import { MessageOverlay, type VisibleMessage } from "../../components/MessageOverlay";
 import { ChatInputBar } from "../../components/ChatInputBar";
 import { sendMessage, type ChatMessage } from "../../utils/messages";
@@ -54,6 +55,16 @@ const SCREEN_H = Dimensions.get("window").height;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const ROOM_CHAT_PAGE_SIZE = 40;
 const ROOM_POST_PAGE_SIZE = 12;
+
+function prefetchFirstFourFeedPhotos(postsList: FeedPhoto[]) {
+  const urls = postsList
+    .slice(0, 4)
+    .map((p) => p.photo_url)
+    .filter(Boolean) as string[];
+  urls.forEach((url) => {
+    Image.prefetch(thumbUrl(url));
+  });
+}
 
 const FEED_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
@@ -150,6 +161,8 @@ export default function RoomThread() {
   const [unreadFlashPending, setUnreadFlashPending] = useState(false);
   /** First feed cover is prefetched so the sunset flash runs after the photo is ready (not only after URLs arrive). */
   const [firstFeedImageReady, setFirstFeedImageReady] = useState(false);
+  /** Chat/message layer over the feed — fades in after messages load; feed photos do not wait on `loading`. */
+  const feedOverlayOpacity = useRef(new Animated.Value(0)).current;
 
   // Route param / SecureStore: arm one-shot flash only after content is visible (see effect below)
   useEffect(() => {
@@ -173,32 +186,40 @@ export default function RoomThread() {
     if (feedLoading) setFirstFeedImageReady(false);
   }, [feedLoading]);
 
-  // Prefetch newest feed photo so flash waits for image bytes (FlatList may not mount on chat tab).
+  // Warm first cover in background for unread flash — does not gate firstFeedImageReady.
   useEffect(() => {
     if (feedLoading || posts.length === 0) return;
+    setFirstFeedImageReady(true);
     const url = posts[0]?.photo_url;
-    if (!url) {
-      setFirstFeedImageReady(true);
-      return;
-    }
-    let cancelled = false;
-    setFirstFeedImageReady(false);
-    Image.prefetch(url)
+    if (!url) return;
+    const prefetchStart = Date.now();
+    console.log("[Image.prefetch] start (no gate)", url, "at", prefetchStart);
+    Image.prefetch(thumbUrl(url))
       .then(() => {
-        if (!cancelled) setFirstFeedImageReady(true);
+        console.log("[Image.prefetch] done", Date.now() - prefetchStart, "ms");
       })
       .catch(() => {
-        if (!cancelled) setFirstFeedImageReady(true);
+        console.log("[Image.prefetch] done (error)", Date.now() - prefetchStart, "ms");
       });
-    return () => {
-      cancelled = true;
-    };
   }, [feedLoading, posts.length, posts[0]?.id, posts[0]?.photo_url]);
 
-  // Run warm glow only after feed + chat loads finish, first cover is ready when there is a feed, and content exists
+  useEffect(() => {
+    if (loading) {
+      feedOverlayOpacity.setValue(0);
+      return;
+    }
+    Animated.timing(feedOverlayOpacity, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [loading, feedOverlayOpacity]);
+
+  // Run warm glow only after feed load finishes, first cover is ready when there is a feed, and content exists
   useEffect(() => {
     if (!unreadFlashPending || !code) return;
-    if (feedLoading || loading) return;
+    if (feedLoading) return;
     const hasContent = posts.length > 0 || messages.length > 0;
     if (!hasContent) {
       setUnreadFlashPending(false);
@@ -215,7 +236,6 @@ export default function RoomThread() {
   }, [
     unreadFlashPending,
     feedLoading,
-    loading,
     posts.length,
     messages.length,
     firstFeedImageReady,
@@ -343,7 +363,25 @@ export default function RoomThread() {
       setFeedLoadingMore(true);
     }
     setFeedError(null);
+    const start = Date.now();
     try {
+      if (reset) {
+        const cached = getCache(code);
+        if (cached) {
+          console.log("[loadFeed] cache HIT");
+          roomIdRef.current = cached.roomId;
+          setOverlayRoomId(cached.roomId);
+          setPosts(cached.posts);
+          console.log("[loadFeed] posts set, count:", cached.posts.length);
+          prefetchFirstFourFeedPhotos(cached.posts);
+          setFeedHasMore(cached.posts.length >= ROOM_POST_PAGE_SIZE);
+          clearCache(code);
+          console.log(`[loadFeed] done ${Date.now() - start}ms`);
+          return;
+        }
+        console.log("[loadFeed] cache MISS");
+      }
+
       const { data: room, error: roomErr } = await supabase
         .from("rooms")
         .select("id")
@@ -361,18 +399,50 @@ export default function RoomThread() {
       roomIdRef.current = room.id;
       setOverlayRoomId(room.id);
 
+      const listForPrefetch = reset
+        ? photos
+        : [...posts, ...photos.filter((p) => !posts.some((x) => x.id === p.id))];
+
       setPosts((prev) => {
         if (reset) return photos;
         const existing = new Set(prev.map((p) => p.id));
         return [...prev, ...photos.filter((p) => !existing.has(p.id))];
       });
+      if (reset && photos.length > 0 && photos[0].photo_url) {
+        fetch(photos[0].photo_url, { method: "HEAD" })
+          .then((r) => {
+            const bytes = r.headers.get("content-length");
+            const kb = bytes ? Math.round(Number(bytes) / 1024) : "?";
+            console.log("[photo size]", kb, "KB", photos[0].photo_url);
+          })
+          .catch(() => {});
+
+        const transformed = thumbUrl(photos[0].photo_url);
+        fetch(transformed, { method: "HEAD" })
+          .then((r) => {
+            const bytes = r.headers.get("content-length");
+            const kb = bytes ? Math.round(Number(bytes) / 1024) : "?";
+            console.log("[thumb size]", kb, "KB", r.status, transformed);
+          })
+          .catch((e: unknown) => {
+            console.log(
+              "[thumb error]",
+              e instanceof Error ? e.message : String(e),
+              transformed
+            );
+          });
+      }
+      prefetchFirstFourFeedPhotos(listForPrefetch);
+      console.log("[loadFeed] posts set, count:", reset ? photos.length : posts.length + photos.filter((p) => !posts.some((x) => x.id === p.id)).length);
       setFeedHasMore(photos.length === ROOM_POST_PAGE_SIZE);
+      console.log(`[loadFeed] done ${Date.now() - start}ms`);
     } catch (e: any) {
       console.error(e);
       setFeedError(e.message ?? "Something went wrong.");
     } finally {
       if (reset) {
         setFeedLoading(false);
+        console.log("[loadFeed] feedLoading cleared", Date.now() - start, "ms");
       } else {
         setFeedLoadingMore(false);
       }
@@ -386,7 +456,35 @@ export default function RoomThread() {
     } else {
       setChatLoadingMore(true);
     }
+    const start = Date.now();
     try {
+      if (reset) {
+        const cached = getCache(code);
+        if (cached) {
+          console.log("[loadMessages] cache HIT");
+          const [nick, deviceId, reported] = await Promise.all([
+            getRoomNickname(code),
+            getDeviceId(),
+            getReportedMessageIds(),
+          ]);
+          const filtered = cached.messages.filter((m) => !reported.has(m.id));
+          const sorted = [...filtered].sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          setMessages(sorted);
+          setNickname(nick);
+          setMyDeviceId(deviceId);
+          setSenderNames(cached.nicknames);
+          setReactions(cached.reactions);
+          setChatHasMore(filtered.length >= ROOM_CHAT_PAGE_SIZE);
+          setLastSeen(code).catch(() => {});
+          clearCache(code);
+          console.log(`[loadMessages] done ${Date.now() - start}ms`);
+          return;
+        }
+        console.log("[loadMessages] cache MISS");
+      }
+
       const from = reset ? 0 : messages.length;
       const [msgs, nick, deviceId, reported] = await Promise.all([
         fetchRoomMessagesByCode(code, { from, to: from + ROOM_CHAT_PAGE_SIZE - 1 }),
@@ -414,6 +512,7 @@ export default function RoomThread() {
       setReactions(rxns);
       setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
       setLastSeen(code).catch(() => {});
+      console.log(`[loadMessages] done ${Date.now() - start}ms`);
 
       const withCoords = merged.filter((m) => m.lat && m.lng);
       if (withCoords.length > 0) {
@@ -435,14 +534,20 @@ export default function RoomThread() {
     } finally {
       if (reset) {
         setLoading(false);
+        console.log("[loadMessages] loading cleared", Date.now() - start, "ms");
       } else {
         setChatLoadingMore(false);
       }
     }
   }
 
+  useEffect(() => {
+    console.log("[render gate] loading:", loading, "feedLoading:", feedLoading);
+  }, [loading, feedLoading]);
+
   useFocusEffect(
     useCallback(() => {
+      console.log(`[room ${code}] focus`);
       const isNewRoom = loadedCodeRef.current !== code;
       if (isNewRoom) {
         setLoading(true);
@@ -728,7 +833,10 @@ export default function RoomThread() {
 
       {viewMode === "feed" ? (
         feedLoading ? (
-          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+          <>
+            {console.log("[spinner visible] feedLoading spinner")}
+            <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+          </>
         ) : feedError ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
             <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center", marginBottom: 8 }}>
@@ -757,10 +865,10 @@ export default function RoomThread() {
               snapToAlignment="center"
               decelerationRate="fast"
               showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
+              renderItem={({ item, index }) => (
                 <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
                   {item.photo_url ? (
-                    <FeedImage uri={item.photo_url} />
+                    <FeedImage uri={thumbUrl(item.photo_url)} listIndex={index} />
                   ) : (
                     <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
                       <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
@@ -812,7 +920,10 @@ export default function RoomThread() {
                       }}
                     >
                       {feedLoadingMore ? (
-                        <ActivityIndicator color={colors.cream} size="small" />
+                        <>
+                          {console.log("[spinner visible] condition: feedLoadingMore")}
+                          <ActivityIndicator color={colors.cream} size="small" />
+                        </>
                       ) : (
                         <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
                       )}
@@ -822,62 +933,89 @@ export default function RoomThread() {
               }
             />
 
-            {/* Floating overlay and input for feed view */}
-            <MessageOverlay
-              messages={visibleMessages}
-              onExpire={(id) =>
-                setVisibleMessages((prev) => prev.filter((m) => m.id !== id))
-              }
-            />
-            <ChatInputBar
-              disabled={!roomIdRef.current || !myDeviceId}
-              onSendMessage={async (body) => {
-                if (!roomIdRef.current || !myDeviceId) return;
-                try {
-                  const msg = await sendMessage({
-                    roomId: roomIdRef.current,
-                    deviceId: myDeviceId,
-                    body,
-                    location: locationRef.current,
-                  });
-                  const overlay: VisibleMessage = {
-                    id: msg.id,
-                    body: msg.body,
-                    isPreset: msg.is_preset,
-                    presetKey: msg.preset_key ?? undefined,
-                  };
-                  setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
-                } catch (e) {
-                  console.error("sendMessage failed", e);
+            {/* Floating overlay and input for feed view — independent of feed fetch; fades in when messages are ready */}
+            {loading && posts.length > 0 ? (
+              <>
+                {console.log(
+                  "[spinner visible] condition: loading && posts.length > 0 (feed overlay / messages loading)"
+                )}
+                <View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    bottom: 112,
+                    left: 0,
+                    right: 0,
+                    alignItems: "center",
+                  }}
+                >
+                  <ActivityIndicator color={colors.cream} size="small" />
+                </View>
+              </>
+            ) : null}
+            <Animated.View
+              style={[StyleSheet.absoluteFillObject, { opacity: feedOverlayOpacity }]}
+              pointerEvents={loading ? "none" : "box-none"}
+            >
+              <MessageOverlay
+                messages={visibleMessages}
+                onExpire={(id) =>
+                  setVisibleMessages((prev) => prev.filter((m) => m.id !== id))
                 }
-              }}
-              onSendPreset={async (presetKey) => {
-                if (!roomIdRef.current || !myDeviceId) return;
-                try {
-                  const msg = await sendMessage({
-                    roomId: roomIdRef.current,
-                    deviceId: myDeviceId,
-                    body: presetKey,
-                    isPreset: true,
-                    presetKey,
-                    location: locationRef.current,
-                  });
-                  const overlay: VisibleMessage = {
-                    id: msg.id,
-                    body: msg.body,
-                    isPreset: msg.is_preset,
-                    presetKey: msg.preset_key ?? undefined,
-                  };
-                  setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
-                } catch (e) {
-                  console.error("sendMessage preset failed", e);
-                }
-              }}
-            />
+              />
+              <ChatInputBar
+                disabled={!roomIdRef.current || !myDeviceId}
+                onSendMessage={async (body) => {
+                  if (!roomIdRef.current || !myDeviceId) return;
+                  try {
+                    const msg = await sendMessage({
+                      roomId: roomIdRef.current,
+                      deviceId: myDeviceId,
+                      body,
+                      location: locationRef.current,
+                    });
+                    const overlay: VisibleMessage = {
+                      id: msg.id,
+                      body: msg.body,
+                      isPreset: msg.is_preset,
+                      presetKey: msg.preset_key ?? undefined,
+                    };
+                    setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
+                  } catch (e) {
+                    console.error("sendMessage failed", e);
+                  }
+                }}
+                onSendPreset={async (presetKey) => {
+                  if (!roomIdRef.current || !myDeviceId) return;
+                  try {
+                    const msg = await sendMessage({
+                      roomId: roomIdRef.current,
+                      deviceId: myDeviceId,
+                      body: presetKey,
+                      isPreset: true,
+                      presetKey,
+                      location: locationRef.current,
+                    });
+                    const overlay: VisibleMessage = {
+                      id: msg.id,
+                      body: msg.body,
+                      isPreset: msg.is_preset,
+                      presetKey: msg.preset_key ?? undefined,
+                    };
+                    setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
+                  } catch (e) {
+                    console.error("sendMessage preset failed", e);
+                  }
+                }}
+              />
+            </Animated.View>
           </View>
         )
       ) : loading ? (
-        <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+        <>
+          {console.log("[spinner visible] loading spinner")}
+          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+        </>
       ) : loadError ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
           <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
@@ -942,7 +1080,10 @@ export default function RoomThread() {
                   }}
                 >
                   {chatLoadingMore ? (
-                    <ActivityIndicator color={colors.cream} size="small" />
+                    <>
+                      {console.log("[spinner visible] condition: chatLoadingMore")}
+                      <ActivityIndicator color={colors.cream} size="small" />
+                    </>
                   ) : (
                     <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
                   )}
@@ -1032,10 +1173,14 @@ export default function RoomThread() {
               activeOpacity={0.85}
               style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
             >
-              {sending
-                ? <ActivityIndicator color="white" />
-                : <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
-              }
+              {sending ? (
+                <>
+                  {console.log("[spinner visible] condition: sending (camera pipeline send)")}
+                  <ActivityIndicator color="white" />
+                </>
+              ) : (
+                <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -1089,11 +1234,17 @@ export default function RoomThread() {
   );
 }
 
-function FeedImage({ uri }: { uri: string }) {
+function FeedImage({ uri, listIndex }: { uri: string; listIndex?: number }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const onLoadEnd = useCallback(() => {
+  const didLogFeedUriRef = useRef(false);
+  const runFadeIn = useCallback(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
   }, [fadeAnim]);
+
+  if (listIndex === 0 && !didLogFeedUriRef.current) {
+    didLogFeedUriRef.current = true;
+    console.log("[FeedImage uri]", uri.substring(uri.indexOf("/photos/")));
+  }
 
   return (
     <View style={{ width: SCREEN_W, height: SCREEN_H - 140, backgroundColor: colors.mist }}>
@@ -1102,7 +1253,17 @@ function FeedImage({ uri }: { uri: string }) {
         style={{ width: SCREEN_W, height: SCREEN_H - 140, opacity: fadeAnim }}
         resizeMode="cover"
         {...(Platform.OS === "android" ? { resizeMethod: "resize" as const } : {})}
-        onLoadEnd={onLoadEnd}
+        onLoadStart={
+          listIndex === 0 ? () => console.log("[FeedImage] load start", Date.now()) : undefined
+        }
+        onLoadEnd={
+          listIndex === 0
+            ? () => {
+                console.log("[FeedImage] load end", Date.now());
+                runFadeIn();
+              }
+            : runFadeIn
+        }
       />
     </View>
   );

@@ -143,11 +143,12 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
   const orangeOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0.65, 0] });
   const pinkOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 0.55] });
 
+  const surfaceFill = lifted ? "#FFF3E0" : "#FFFDF8";
+
   return (
     <View ref={ref} style={{ width, height }}>
       <Animated.View style={{ position: "absolute", width, height, transform: [{ scale: cloudScale }] }}>
 
-        {/* Sunset color layers — beneath cloud surface, bleed through semi-transparent white */}
         {unread && (
           <>
             <Animated.View style={{ position: "absolute", opacity: orangeOpacity }}>
@@ -159,32 +160,31 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
           </>
         )}
 
-        {/* Cloud surface — opacity on the View, not the SVG fill, so internal circle geometry stays hidden */}
         <View style={{ position: "absolute", opacity: unread ? 0.78 : 1 }}>
-          <CloudShape width={width} height={height} fill={lifted ? "#FFF3E0" : "#FFFDF8"} variant={variant} />
+          <CloudShape width={width} height={height} fill={surfaceFill} variant={variant} />
         </View>
 
-        {/* Room name — anchored to ~55% from top which is the base ellipse centre in all variants */}
-        <View style={{
-          position: "absolute",
-          top: height * 0.47,
-          left: 0, right: 0,
-          alignItems: "center",
-          paddingHorizontal: width * 0.1,
-          opacity: hideLabel ? 0 : 1,
-        }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontSize: Math.round(width * 0.074),
-              fontWeight: "800",
-              color: colors.charcoal,
-              textAlign: "center",
-            }}
-          >
-            {name}
-          </Text>
-        </View>
+        {!hideLabel && (
+          <View style={{
+            position: "absolute",
+            top: height * 0.47,
+            left: 0, right: 0,
+            alignItems: "center",
+            paddingHorizontal: width * 0.1,
+          }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                fontSize: Math.round(width * 0.074),
+                fontWeight: "800",
+                color: colors.charcoal,
+                textAlign: "center",
+              }}
+            >
+              {name}
+            </Text>
+          </View>
+        )}
 
       </Animated.View>
     </View>

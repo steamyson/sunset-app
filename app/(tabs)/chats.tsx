@@ -38,7 +38,7 @@ import { supabase } from "../../utils/supabase";
 import { getItem, setItem } from "../../utils/storage";
 import { getDeviceId } from "../../utils/device";
 import { leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
-import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
+import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../utils/roomCache";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
@@ -81,6 +81,8 @@ const SKY_TOP_OFFSET = 100;
 const SKY_CONTENT_HEIGHT = H - TAB_BAR_HEIGHT;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const CLOUD_POS_KEY = "cloud_pos_v1";
+/** Base diameter (px) before scale; `scale: 40` covers the screen from center. */
+const TAP_BLOOM_BASE = 48;
 
 async function loadSavedPositions(): Promise<Record<string, { x: number; y: number }> | null> {
   const raw = await getItem(CLOUD_POS_KEY);
@@ -132,18 +134,14 @@ export default function ChatsScreen() {
   // Per-cloud refs for measureInWindow (tap-to-zoom)
   const cloudRefsRef = useRef<Record<string, React.RefObject<View | null>>>({});
 
-  // Camera-zoom tap transition: scale the sky canvas toward the tapped cloud
-  const tapZoomScale = useRef(new Animated.Value(1)).current;
-  const tapZoomTX    = useRef(new Animated.Value(0)).current;
-  const tapZoomTY    = useRef(new Animated.Value(0)).current;
   const isTapZoomingRef = useRef(false);
   const [zoomingRoomId, setZoomingRoomId] = useState<string | null>(null);
+  /** Window coordinates for tap bloom center (measureInWindow). */
+  const [tapBloomCenter, setTapBloomCenter] = useState<{ cx: number; cy: number } | null>(null);
+  const tapBloomScale = useRef(new Animated.Value(0)).current;
+  const tapBloomOpacity = useRef(new Animated.Value(0)).current;
 
-  // Measured center of the sky canvas container in screen coordinates.
-  // Updated via onLayout + measureInWindow so it is accurate on both iOS and Android
-  // regardless of status-bar / tab-bar geometry.
   const canvasContainerRef = useRef<View>(null);
-  const canvasPivotRef = useRef({ x: W / 2, y: H / 2 });
 
   // Unified zoom: 1 = sky, 0.18-0.55 = globe (deeper zoom at lower values), 0.78+ = return to sky
   const zoomLevel = useRef(new Animated.Value(1)).current;
@@ -331,6 +329,7 @@ export default function ChatsScreen() {
           const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
           map[room.code] = true;
           await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+          prefetchRoom(room.code);
         }
       )
       .subscribe();
@@ -671,58 +670,59 @@ export default function ChatsScreen() {
     }, [fitCloudsToView, rooms])
   );
 
-  // Camera-zoom toward cloud: scale the sky canvas up from the cloud's screen center, then navigate
-  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number) {
+  function markRoomReadAfterNav(roomCode: string) {
+    InteractionManager.runAfterInteractions(() => {
+      setUnreadRooms((prev) => {
+        const next = new Set(prev);
+        next.delete(roomCode);
+        return next;
+      });
+      getItem(UNREAD_PHOTOS_KEY).then((raw) => {
+        const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+        map[roomCode] = false;
+        setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+      });
+    });
+  }
+
+  // Warm white bloom from cloud center → full screen (native driver), then navigate.
+  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number, unread: boolean) {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
-    // Hide the name label immediately so it doesn't scale up with the cloud.
-    setZoomingRoomId(room.id);
-    const targetScale = 25;
-    // Anchor the scale to the cloud center: translate so cloud center stays on screen center.
-    // RN scales the Animated.View around its own geometric center (the center of its rendered
-    // bounds on screen). We measure this pivot via canvasContainerRef.measureInWindow() on layout
-    // so it is accurate on both iOS and Android regardless of status-bar / tab-bar geometry.
-    const pivotX = canvasPivotRef.current.x;
-    const pivotY = canvasPivotRef.current.y;
-    const tx = (pivotX - cloudCX) * targetScale;
-    const ty = (pivotY - cloudCY) * targetScale;
+    setTapBloomCenter({ cx: cloudCX, cy: cloudCY });
+    tapBloomScale.setValue(0);
+    tapBloomOpacity.setValue(1);
 
-    tapZoomTX.setValue(0);
-    tapZoomTY.setValue(0);
-    tapZoomScale.setValue(1);
-
-    Animated.parallel([
-      Animated.timing(tapZoomScale, { toValue: targetScale, duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
-      Animated.timing(tapZoomTX,    { toValue: tx,          duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
-      Animated.timing(tapZoomTY,    { toValue: ty,          duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
-    ]).start(({ finished }) => {
-      if (finished) {
-        const unread = unreadRooms.has(room.code);
-        // Small delay lets the final animation frame render before the new screen mounts.
-        setTimeout(() => {
+    requestAnimationFrame(() => {
+      Animated.timing(tapBloomScale, {
+        toValue: 40,
+        duration: 700,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) {
+          console.log("[cloud tap] navigating", Date.now());
           router.push({
             pathname: "/room/[code]",
             params: unread
               ? { code: room.code, unread: "true" }
               : { code: room.code },
           });
-        }, 50);
-      }
+          if (unread) markRoomReadAfterNav(room.code);
+        }
+      });
     });
   }
 
-  // Reset tap-zoom when chats screen regains focus (after returning from room).
-  // setValue() for an immediate synchronous snap back to identity.
   useFocusEffect(
     useCallback(() => {
-      if (isTapZoomingRef.current) {
-        isTapZoomingRef.current = false;
-        tapZoomScale.setValue(1);
-        tapZoomTX.setValue(0);
-        tapZoomTY.setValue(0);
-      }
+      // Reset when this screen becomes visible again (e.g. back from room), not on blur.
+      isTapZoomingRef.current = false;
+      tapBloomScale.setValue(0);
+      tapBloomOpacity.setValue(0);
+      setTapBloomCenter(null);
       setZoomingRoomId(null);
-    }, [tapZoomScale, tapZoomTX, tapZoomTY])
+    }, [tapBloomScale, tapBloomOpacity])
   );
 
   // Callbacks for pan responder (tap vs long-press vs drag)
@@ -863,6 +863,7 @@ export default function ChatsScreen() {
 
   // Tap cloud → navigate into room (or toggle selection when in select mode)
   function handleCloudPress(room: Room) {
+    console.log("[cloud tap] start", Date.now());
     if (selectModeForLeave) {
       setSelectedRoomIds((prev) => {
         const next = new Set(prev);
@@ -873,16 +874,9 @@ export default function ChatsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
       currentRoomCodeRef.current = room.code;
-      setUnreadRooms((prev) => {
-        const next = new Set(prev);
-        next.delete(room.code);
-        return next;
-      });
-      getItem(UNREAD_PHOTOS_KEY).then((raw) => {
-        const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
-        map[room.code] = false;
-        setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
-      });
+      const unread = unreadRooms.has(room.code);
+      // Hide room name immediately (hideLabel on SkyCloud) before measureInWindow / zoom.
+      setZoomingRoomId(room.id);
 
       // Measure cloud screen position for camera-zoom transition
       const cloudRef = cloudRefsRef.current[room.id];
@@ -890,25 +884,27 @@ export default function ChatsScreen() {
         cloudRef.current.measureInWindow((mx, my, mw, mh) => {
           if (mw === 0 || mh === 0) {
             // Fallback: measureInWindow returned zeros — plain push
-            const unread = unreadRooms.has(room.code);
+            console.log("[cloud tap] navigating", Date.now());
             router.push({
               pathname: "/room/[code]",
               params: unread ? { code: room.code, unread: "true" } : { code: room.code },
             });
+            if (unread) markRoomReadAfterNav(room.code);
             return;
           }
           // Zoom toward cloud center
           const cloudCX = mx + mw / 2;
           const cloudCY = my + mh / 2;
-          zoomIntoCloud(room, cloudCX, cloudCY);
+          zoomIntoCloud(room, cloudCX, cloudCY, unread);
         });
       } else {
         // No ref — fallback to plain push
-        const unread = unreadRooms.has(room.code);
+        console.log("[cloud tap] navigating", Date.now());
         router.push({
           pathname: "/room/[code]",
           params: unread ? { code: room.code, unread: "true" } : { code: room.code },
         });
+        if (unread) markRoomReadAfterNav(room.code);
       }
     }
   }
@@ -1011,10 +1007,6 @@ export default function ChatsScreen() {
             ref={canvasContainerRef}
             onLayout={(e) => {
               skyHeightRef.current = e.nativeEvent.layout.height;
-              // Measure actual screen position so zoomIntoCloud can use the true pivot.
-              canvasContainerRef.current?.measureInWindow((x, y, w, h) => {
-                canvasPivotRef.current = { x: x + w / 2, y: y + h / 2 };
-              });
             }}
             style={{
               position: "absolute",
@@ -1026,11 +1018,7 @@ export default function ChatsScreen() {
               pointerEvents="box-none"
               style={{
                 ...StyleSheet.absoluteFillObject,
-                transform: [
-                  { translateX: tapZoomTX },
-                  { translateY: tapZoomTY },
-                  { scale: Animated.multiply(skyScale, tapZoomScale) },
-                ],
+                transform: [{ scale: skyScale }],
                 opacity: skyOpacity,
               }}
             >
@@ -1419,6 +1407,22 @@ export default function ChatsScreen() {
         </View>
       </Modal>
     </View>
+
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          left: (tapBloomCenter?.cx ?? 0) - TAP_BLOOM_BASE / 2,
+          top: (tapBloomCenter?.cy ?? 0) - TAP_BLOOM_BASE / 2,
+          width: TAP_BLOOM_BASE,
+          height: TAP_BLOOM_BASE,
+          borderRadius: TAP_BLOOM_BASE / 2,
+          backgroundColor: "#FFFDF8",
+          zIndex: 100000,
+          opacity: tapBloomOpacity,
+          transform: [{ scale: tapBloomScale }],
+        }}
+      />
     </View>
   );
 }

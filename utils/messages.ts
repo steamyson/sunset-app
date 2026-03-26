@@ -80,6 +80,17 @@ async function getLocation(): Promise<{ lat: number; lng: number } | null> {
   }
 }
 
+/** Supabase storage image transform — smaller download for feeds (no upload change). */
+export function thumbUrl(url: string, width = 640): string {
+  if (!url || !url.includes("/storage/v1/object/public/")) return url;
+  return (
+    url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") +
+    "?width=" +
+    width +
+    "&quality=70"
+  );
+}
+
 async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
   const path = `${deviceId}/${Date.now()}.jpg`;
 
