@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   View,
   TouchableOpacity,
@@ -121,8 +121,8 @@ export default function ChatsScreen() {
   const [renaming, setRenaming] = useState<Room | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
-  // Options sheet (shown on long-hold-in-place)
-  const [optionsRoom, setOptionsRoom] = useState<Room | null>(null);
+  // Options sheet (shown on long-hold-in-place) — state lives in OptionsSheet
+  const optionsSheetRef = useRef<OptionsSheetHandle>(null);
   const [leavingRoom, setLeavingRoom] = useState(false);
 
   // Multi-select mode for leaving multiple rooms at once
@@ -737,7 +737,7 @@ export default function ChatsScreen() {
       toggleSelectModeSelection(room);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      setOptionsRoom(room);
+      optionsSheetRef.current?.show(room);
     }
   };
 
@@ -770,7 +770,7 @@ export default function ChatsScreen() {
             longFired = true;
             onOptionsRef.current(room);
           }
-        }, 500);
+        }, 250);
       },
 
       onPanResponderMove: (_, gs) => {
@@ -927,7 +927,7 @@ export default function ChatsScreen() {
   }
 
   function enterSelectModeToLeave(room: Room) {
-    setOptionsRoom(null);
+    optionsSheetRef.current?.hide();
     setSelectModeForLeave(true);
     setSelectedRoomIds(new Set([room.id]));
   }
@@ -942,7 +942,7 @@ export default function ChatsScreen() {
     setLeavingRoom(true);
     // Optimistic: remove room from UI immediately
     setRooms((prev) => prev.filter((r) => r.id !== room.id));
-    setOptionsRoom(null);
+    optionsSheetRef.current?.hide();
     const code = room.code;
     leaveRoom(code).catch((e) => {
       console.error("Failed to leave room", code, e);
@@ -1284,77 +1284,21 @@ export default function ChatsScreen() {
         )}
       </SafeAreaView>
 
-      {/* Options sheet (long hold in place) */}
-      <Modal
-        visible={optionsRoom !== null}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setOptionsRoom(null)}
-      >
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.35)", justifyContent: "flex-end" }}
-          activeOpacity={1}
-          onPress={() => setOptionsRoom(null)}
-        >
-          <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
-            <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 4 }}>
-              {optionsRoom ? (nicknames[optionsRoom.code] ?? optionsRoom.code) : ""}
-            </Text>
-            <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 2, marginBottom: 24 }}>
-              {optionsRoom?.code}
-            </Text>
-
-            <TouchableOpacity
-              onPress={() => {
-                if (!optionsRoom) return;
-                setOptionsRoom(null);
-                setTimeout(() => {
-                  setRenameInput(nicknames[optionsRoom.code] ?? "");
-                  setRenaming(optionsRoom);
-                }, 300);
-              }}
-              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
-            >
-              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Rename</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => optionsRoom && handleShareCode(optionsRoom.code)}
-              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
-            >
-              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Room Code</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => optionsRoom && enterSelectModeToLeave(optionsRoom)}
-              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
-            >
-              <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Select multiple to leave</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => {
-                if (!optionsRoom) return;
-                Alert.alert(
-                  "Leave Room?",
-                  "You can rejoin anytime with the room code.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Leave", style: "destructive", onPress: () => handleLeaveRoom(optionsRoom) },
-                  ]
-                );
-              }}
-              disabled={leavingRoom}
-              style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16 }}
-            >
-              {leavingRoom
-                ? <ActivityIndicator color={colors.magenta} />
-                : <Text style={{ fontSize: 16, color: colors.magenta, fontWeight: "600" }}>Leave Room</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <OptionsSheet
+        ref={optionsSheetRef}
+        nicknames={nicknames}
+        leavingRoom={leavingRoom}
+        onRename={(room) => {
+          optionsSheetRef.current?.hide();
+          setTimeout(() => {
+            setRenameInput(nicknames[room.code] ?? "");
+            setRenaming(room);
+          }, 300);
+        }}
+        onShare={(code) => handleShareCode(code)}
+        onSelectToLeave={(room) => enterSelectModeToLeave(room)}
+        onLeave={(room) => handleLeaveRoom(room)}
+      />
 
       {/* Add room sheet */}
       <Modal
@@ -1477,6 +1421,92 @@ export default function ChatsScreen() {
     </View>
   );
 }
+
+// ─── Options sheet (extracted to avoid re-rendering ChatsScreen) ─────────────
+
+type OptionsSheetHandle = { show: (room: Room) => void; hide: () => void };
+
+const OptionsSheet = forwardRef<OptionsSheetHandle, {
+  nicknames: Record<string, string>;
+  leavingRoom: boolean;
+  onRename: (room: Room) => void;
+  onShare: (code: string) => void;
+  onSelectToLeave: (room: Room) => void;
+  onLeave: (room: Room) => void;
+}>(function OptionsSheet({ nicknames, leavingRoom, onRename, onShare, onSelectToLeave, onLeave }, ref) {
+  const [room, setRoom] = useState<Room | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    show: (r: Room) => setRoom(r),
+    hide: () => setRoom(null),
+  }));
+
+  return (
+    <Modal
+      visible={room !== null}
+      transparent
+      animationType="none"
+      onRequestClose={() => setRoom(null)}
+    >
+      <TouchableOpacity
+        style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.35)", justifyContent: "flex-end" }}
+        activeOpacity={1}
+        onPress={() => setRoom(null)}
+      >
+        <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
+          <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 4 }}>
+            {room ? (nicknames[room.code] ?? room.code) : ""}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 2, marginBottom: 24 }}>
+            {room?.code}
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => room && onRename(room)}
+            style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+          >
+            <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Rename</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => room && onShare(room.code)}
+            style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+          >
+            <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Room Code</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => room && onSelectToLeave(room)}
+            style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+          >
+            <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Select multiple to leave</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              if (!room) return;
+              Alert.alert(
+                "Leave Room?",
+                "You can rejoin anytime with the room code.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Leave", style: "destructive", onPress: () => onLeave(room) },
+                ]
+              );
+            }}
+            disabled={leavingRoom}
+            style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16 }}
+          >
+            {leavingRoom
+              ? <ActivityIndicator color={colors.magenta} />
+              : <Text style={{ fontSize: 16, color: colors.magenta, fontWeight: "600" }}>Leave Room</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+});
 
 type SharedNum = { value: number };
 
