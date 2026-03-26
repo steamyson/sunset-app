@@ -192,15 +192,7 @@ export default function RoomThread() {
     setFirstFeedImageReady(true);
     const url = posts[0]?.photo_url;
     if (!url) return;
-    const prefetchStart = Date.now();
-    console.log("[Image.prefetch] start (no gate)", url, "at", prefetchStart);
-    Image.prefetch(thumbUrl(url))
-      .then(() => {
-        console.log("[Image.prefetch] done", Date.now() - prefetchStart, "ms");
-      })
-      .catch(() => {
-        console.log("[Image.prefetch] done (error)", Date.now() - prefetchStart, "ms");
-      });
+    Image.prefetch(thumbUrl(url)).catch(() => {});
   }, [feedLoading, posts.length, posts[0]?.id, posts[0]?.photo_url]);
 
   useEffect(() => {
@@ -363,23 +355,18 @@ export default function RoomThread() {
       setFeedLoadingMore(true);
     }
     setFeedError(null);
-    const start = Date.now();
     try {
       if (reset) {
         const cached = getCache(code);
         if (cached) {
-          console.log("[loadFeed] cache HIT");
           roomIdRef.current = cached.roomId;
           setOverlayRoomId(cached.roomId);
           setPosts(cached.posts);
-          console.log("[loadFeed] posts set, count:", cached.posts.length);
           prefetchFirstFourFeedPhotos(cached.posts);
           setFeedHasMore(cached.posts.length >= ROOM_POST_PAGE_SIZE);
           clearCache(code);
-          console.log(`[loadFeed] done ${Date.now() - start}ms`);
           return;
         }
-        console.log("[loadFeed] cache MISS");
       }
 
       const { data: room, error: roomErr } = await supabase
@@ -408,41 +395,14 @@ export default function RoomThread() {
         const existing = new Set(prev.map((p) => p.id));
         return [...prev, ...photos.filter((p) => !existing.has(p.id))];
       });
-      if (reset && photos.length > 0 && photos[0].photo_url) {
-        fetch(photos[0].photo_url, { method: "HEAD" })
-          .then((r) => {
-            const bytes = r.headers.get("content-length");
-            const kb = bytes ? Math.round(Number(bytes) / 1024) : "?";
-            console.log("[photo size]", kb, "KB", photos[0].photo_url);
-          })
-          .catch(() => {});
-
-        const transformed = thumbUrl(photos[0].photo_url);
-        fetch(transformed, { method: "HEAD" })
-          .then((r) => {
-            const bytes = r.headers.get("content-length");
-            const kb = bytes ? Math.round(Number(bytes) / 1024) : "?";
-            console.log("[thumb size]", kb, "KB", r.status, transformed);
-          })
-          .catch((e: unknown) => {
-            console.log(
-              "[thumb error]",
-              e instanceof Error ? e.message : String(e),
-              transformed
-            );
-          });
-      }
       prefetchFirstFourFeedPhotos(listForPrefetch);
-      console.log("[loadFeed] posts set, count:", reset ? photos.length : posts.length + photos.filter((p) => !posts.some((x) => x.id === p.id)).length);
       setFeedHasMore(photos.length === ROOM_POST_PAGE_SIZE);
-      console.log(`[loadFeed] done ${Date.now() - start}ms`);
     } catch (e: any) {
       console.error(e);
       setFeedError(e.message ?? "Something went wrong.");
     } finally {
       if (reset) {
         setFeedLoading(false);
-        console.log("[loadFeed] feedLoading cleared", Date.now() - start, "ms");
       } else {
         setFeedLoadingMore(false);
       }
@@ -456,12 +416,10 @@ export default function RoomThread() {
     } else {
       setChatLoadingMore(true);
     }
-    const start = Date.now();
     try {
       if (reset) {
         const cached = getCache(code);
         if (cached) {
-          console.log("[loadMessages] cache HIT");
           const [nick, deviceId, reported] = await Promise.all([
             getRoomNickname(code),
             getDeviceId(),
@@ -479,10 +437,8 @@ export default function RoomThread() {
           setChatHasMore(filtered.length >= ROOM_CHAT_PAGE_SIZE);
           setLastSeen(code).catch(() => {});
           clearCache(code);
-          console.log(`[loadMessages] done ${Date.now() - start}ms`);
           return;
         }
-        console.log("[loadMessages] cache MISS");
       }
 
       const from = reset ? 0 : messages.length;
@@ -512,7 +468,6 @@ export default function RoomThread() {
       setReactions(rxns);
       setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
       setLastSeen(code).catch(() => {});
-      console.log(`[loadMessages] done ${Date.now() - start}ms`);
 
       const withCoords = merged.filter((m) => m.lat && m.lng);
       if (withCoords.length > 0) {
@@ -534,20 +489,14 @@ export default function RoomThread() {
     } finally {
       if (reset) {
         setLoading(false);
-        console.log("[loadMessages] loading cleared", Date.now() - start, "ms");
       } else {
         setChatLoadingMore(false);
       }
     }
   }
 
-  useEffect(() => {
-    console.log("[render gate] loading:", loading, "feedLoading:", feedLoading);
-  }, [loading, feedLoading]);
-
   useFocusEffect(
     useCallback(() => {
-      console.log(`[room ${code}] focus`);
       const isNewRoom = loadedCodeRef.current !== code;
       if (isNewRoom) {
         setLoading(true);
@@ -833,10 +782,7 @@ export default function RoomThread() {
 
       {viewMode === "feed" ? (
         feedLoading ? (
-          <>
-            {console.log("[spinner visible] feedLoading spinner")}
-            <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-          </>
+          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
         ) : feedError ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
             <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center", marginBottom: 8 }}>
@@ -865,10 +811,10 @@ export default function RoomThread() {
               snapToAlignment="center"
               decelerationRate="fast"
               showsVerticalScrollIndicator={false}
-              renderItem={({ item, index }) => (
+              renderItem={({ item }) => (
                 <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
                   {item.photo_url ? (
-                    <FeedImage uri={thumbUrl(item.photo_url)} listIndex={index} />
+                    <FeedImage uri={thumbUrl(item.photo_url)} />
                   ) : (
                     <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
                       <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
@@ -920,10 +866,7 @@ export default function RoomThread() {
                       }}
                     >
                       {feedLoadingMore ? (
-                        <>
-                          {console.log("[spinner visible] condition: feedLoadingMore")}
-                          <ActivityIndicator color={colors.cream} size="small" />
-                        </>
+                        <ActivityIndicator color={colors.cream} size="small" />
                       ) : (
                         <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
                       )}
@@ -935,23 +878,18 @@ export default function RoomThread() {
 
             {/* Floating overlay and input for feed view — independent of feed fetch; fades in when messages are ready */}
             {loading && posts.length > 0 ? (
-              <>
-                {console.log(
-                  "[spinner visible] condition: loading && posts.length > 0 (feed overlay / messages loading)"
-                )}
-                <View
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    bottom: 112,
-                    left: 0,
-                    right: 0,
-                    alignItems: "center",
-                  }}
-                >
-                  <ActivityIndicator color={colors.cream} size="small" />
-                </View>
-              </>
+              <View
+                pointerEvents="none"
+                style={{
+                  position: "absolute",
+                  bottom: 112,
+                  left: 0,
+                  right: 0,
+                  alignItems: "center",
+                }}
+              >
+                <ActivityIndicator color={colors.cream} size="small" />
+              </View>
             ) : null}
             <Animated.View
               style={[StyleSheet.absoluteFillObject, { opacity: feedOverlayOpacity }]}
@@ -1012,10 +950,7 @@ export default function RoomThread() {
           </View>
         )
       ) : loading ? (
-        <>
-          {console.log("[spinner visible] loading spinner")}
-          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-        </>
+        <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : loadError ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
           <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
@@ -1080,10 +1015,7 @@ export default function RoomThread() {
                   }}
                 >
                   {chatLoadingMore ? (
-                    <>
-                      {console.log("[spinner visible] condition: chatLoadingMore")}
-                      <ActivityIndicator color={colors.cream} size="small" />
-                    </>
+                    <ActivityIndicator color={colors.cream} size="small" />
                   ) : (
                     <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
                   )}
@@ -1173,12 +1105,7 @@ export default function RoomThread() {
               activeOpacity={0.85}
               style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
             >
-              {sending ? (
-                <>
-                  {console.log("[spinner visible] condition: sending (camera pipeline send)")}
-                  <ActivityIndicator color="white" />
-                </>
-              ) : (
+              {sending ? <ActivityIndicator color="white" /> : (
                 <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
               )}
             </TouchableOpacity>
@@ -1234,17 +1161,11 @@ export default function RoomThread() {
   );
 }
 
-function FeedImage({ uri, listIndex }: { uri: string; listIndex?: number }) {
+function FeedImage({ uri }: { uri: string }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const didLogFeedUriRef = useRef(false);
-  const runFadeIn = useCallback(() => {
+  const onLoadEnd = useCallback(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
   }, [fadeAnim]);
-
-  if (listIndex === 0 && !didLogFeedUriRef.current) {
-    didLogFeedUriRef.current = true;
-    console.log("[FeedImage uri]", uri.substring(uri.indexOf("/photos/")));
-  }
 
   return (
     <View style={{ width: SCREEN_W, height: SCREEN_H - 140, backgroundColor: colors.mist }}>
@@ -1253,17 +1174,7 @@ function FeedImage({ uri, listIndex }: { uri: string; listIndex?: number }) {
         style={{ width: SCREEN_W, height: SCREEN_H - 140, opacity: fadeAnim }}
         resizeMode="cover"
         {...(Platform.OS === "android" ? { resizeMethod: "resize" as const } : {})}
-        onLoadStart={
-          listIndex === 0 ? () => console.log("[FeedImage] load start", Date.now()) : undefined
-        }
-        onLoadEnd={
-          listIndex === 0
-            ? () => {
-                console.log("[FeedImage] load end", Date.now());
-                runFadeIn();
-              }
-            : runFadeIn
-        }
+        onLoadEnd={onLoadEnd}
       />
     </View>
   );

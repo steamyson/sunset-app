@@ -59,8 +59,6 @@ export function clearCache(code: string): void {
 export async function prefetchRoom(code: string): Promise<void> {
   if (inFlight.has(code)) return;
   inFlight.add(code);
-  const start = Date.now();
-  console.log(`[prefetch ${code}] start`);
   try {
     const { data: room, error: roomErr } = await supabase
       .from("rooms")
@@ -68,14 +66,12 @@ export async function prefetchRoom(code: string): Promise<void> {
       .eq("code", code.toUpperCase())
       .maybeSingle();
     if (roomErr || !room) return;
-    console.log(`[prefetch ${code}] roomId ${Date.now() - start}ms`);
 
     const roomId = room.id as string;
     const [posts, messages] = await Promise.all([
       getPhotosForRoom(roomId, { from: 0, to: 11 }),
       fetchRoomMessagesByCode(code, { from: 0, to: 39 }),
     ]);
-    console.log(`[prefetch ${code}] data ${Date.now() - start}ms`);
 
     const uniqueIds = [...new Set(messages.map((m) => m.sender_device_id))];
     const messageIds = messages.map((m) => m.id);
@@ -83,10 +79,8 @@ export async function prefetchRoom(code: string): Promise<void> {
       getNicknames(uniqueIds),
       fetchReactions(messageIds),
     ]);
-    console.log(`[prefetch ${code}] enrichment ${Date.now() - start}ms`);
 
     setCache(code, { roomId, posts, messages, nicknames, reactions });
-    console.log(`[prefetch ${code}] cached ${Date.now() - start}ms`);
   } catch (e) {
     console.warn("prefetchRoom failed for", code, e);
   } finally {

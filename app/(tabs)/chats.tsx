@@ -701,7 +701,6 @@ export default function ChatsScreen() {
         useNativeDriver: true,
       }).start(({ finished }) => {
         if (finished) {
-          console.log("[cloud tap] navigating", Date.now());
           router.push({
             pathname: "/room/[code]",
             params: unread
@@ -863,7 +862,6 @@ export default function ChatsScreen() {
 
   // Tap cloud → navigate into room (or toggle selection when in select mode)
   function handleCloudPress(room: Room) {
-    console.log("[cloud tap] start", Date.now());
     if (selectModeForLeave) {
       setSelectedRoomIds((prev) => {
         const next = new Set(prev);
@@ -884,7 +882,6 @@ export default function ChatsScreen() {
         cloudRef.current.measureInWindow((mx, my, mw, mh) => {
           if (mw === 0 || mh === 0) {
             // Fallback: measureInWindow returned zeros — plain push
-            console.log("[cloud tap] navigating", Date.now());
             router.push({
               pathname: "/room/[code]",
               params: unread ? { code: room.code, unread: "true" } : { code: room.code },
@@ -899,7 +896,6 @@ export default function ChatsScreen() {
         });
       } else {
         // No ref — fallback to plain push
-        console.log("[cloud tap] navigating", Date.now());
         router.push({
           pathname: "/room/[code]",
           params: unread ? { code: room.code, unread: "true" } : { code: room.code },
