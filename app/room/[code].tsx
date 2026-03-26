@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, type Message } from "../../utils/messages";
+import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, type Message, type FeedPhoto } from "../../utils/messages";
 import { getAlias } from "../../utils/aliases";
 import { getRoomNickname } from "../../utils/nicknames";
 import { getNicknames } from "../../utils/identity";
@@ -55,9 +55,7 @@ const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const ROOM_CHAT_PAGE_SIZE = 40;
 const ROOM_POST_PAGE_SIZE = 12;
 
-const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
-const SIGNED_URL_EXPIRY = 3600;
-const CACHE_BUFFER_MS = 300_000;
+const FEED_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 const styles = StyleSheet.create({
   roomWrapper: {
@@ -93,8 +91,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.sunsetBottom,
   },
 });
-
-type PostWithUrl = Post & { signedUrl: string | null };
 
 function formatCountdown(expiresAtISO: string): string {
   const now = Date.now();
@@ -177,7 +173,7 @@ export default function RoomThread() {
   // Feed state
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedError, setFeedError] = useState<string | null>(null);
-  const [posts, setPosts] = useState<PostWithUrl[]>([]);
+  const [posts, setPosts] = useState<FeedPhoto[]>([]);
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [visibleMessages, setVisibleMessages] = useState<VisibleMessage[]>([]);
@@ -283,55 +279,28 @@ export default function RoomThread() {
       if (roomRes.error) throw new Error(roomRes.error.message);
       if (!room) throw new Error("Room not found.");
 
-      const now = new Date();
-      const day = now.toISOString().slice(0, 10);
       optimisticId = `__opt__${Date.now()}`;
-      const optimisticPost: PostWithUrl = {
+      const optimistic: FeedPhoto = {
         id: optimisticId,
         room_id: room.id,
         device_id: deviceId,
-        media_url: "",
-        caption: null,
-        created_at: now.toISOString(),
-        expires_at: new Date(now.getTime() + 24 * 3600000).toISOString(),
-        sunset_date: day,
-        signedUrl: photo,
+        photo_url: photo,
+        created_at: new Date().toISOString(),
+        filter: activeFilter,
+        adjustments: JSON.stringify(activeAdj),
       };
-      setPosts((prev) => [optimisticPost, ...prev]);
+      setPosts((prev) => [optimistic, ...prev]);
 
-      const [, createdPost] = await Promise.all([
-        sendPhoto({
-          uri: photo,
-          roomCodes: [code],
-          deviceId,
-          filter: activeFilter,
-          adjustments: activeAdj,
-        }),
-        createPost({
-          roomId: room.id,
-          roomCode: code,
-          deviceId,
-          mediaUri: photo,
-          location: { lat: 0, lng: 0 },
-        }),
-      ]);
-
-      const { data: signRow } = await supabase.storage
-        .from("post-media")
-        .createSignedUrl(createdPost.media_url, SIGNED_URL_EXPIRY);
-      const signed =
-        signRow?.signedUrl ??
-        null;
-      if (signed) {
-        signedUrlCache.set(createdPost.media_url, {
-          url: signed,
-          expiresAt: Date.now() + SIGNED_URL_EXPIRY * 1000,
-        });
-      }
-      setPosts((prev) => {
-        const rest = prev.filter((p) => p.id !== optimisticId);
-        return [{ ...createdPost, signedUrl: signed ?? photo }, ...rest];
+      await sendPhoto({
+        uri: photo,
+        roomCodes: [code],
+        deviceId,
+        filter: activeFilter,
+        adjustments: activeAdj,
       });
+
+      const fresh = await getPhotosForRoom(room.id, { from: 0, to: ROOM_POST_PAGE_SIZE - 1 });
+      setPosts(fresh);
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeCamera();
@@ -376,48 +345,19 @@ export default function RoomThread() {
       if (!room) throw new Error("Room not found.");
 
       const from = reset ? 0 : posts.length;
-      const rawPosts = await getPostsForRoom(room.id, {
+      const photos = await getPhotosForRoom(room.id, {
         from,
         to: from + ROOM_POST_PAGE_SIZE - 1,
       });
       roomIdRef.current = room.id;
       setOverlayRoomId(room.id);
 
-      const now = Date.now();
-      const resolvedUrls = new Map<string, string>();
-      const uncachedPaths: string[] = [];
-      for (const p of rawPosts) {
-        const cached = signedUrlCache.get(p.media_url);
-        if (cached && cached.expiresAt > now + CACHE_BUFFER_MS) {
-          resolvedUrls.set(p.media_url, cached.url);
-        } else {
-          uncachedPaths.push(p.media_url);
-        }
-      }
-      if (uncachedPaths.length > 0) {
-        const { data: signedData } = await supabase.storage
-          .from("post-media")
-          .createSignedUrls(uncachedPaths, SIGNED_URL_EXPIRY);
-        if (signedData) {
-          const expiresAt = now + SIGNED_URL_EXPIRY * 1000;
-          for (const item of signedData) {
-            if (item.signedUrl && item.path) {
-              signedUrlCache.set(item.path, { url: item.signedUrl, expiresAt });
-              resolvedUrls.set(item.path, item.signedUrl);
-            }
-          }
-        }
-      }
-      const mapped: PostWithUrl[] = rawPosts.map((p) => ({
-        ...p,
-        signedUrl: resolvedUrls.get(p.media_url) ?? null,
-      }));
       setPosts((prev) => {
-        if (reset) return mapped;
+        if (reset) return photos;
         const existing = new Set(prev.map((p) => p.id));
-        return [...prev, ...mapped.filter((p) => !existing.has(p.id))];
+        return [...prev, ...photos.filter((p) => !existing.has(p.id))];
       });
-      setFeedHasMore(rawPosts.length === ROOM_POST_PAGE_SIZE);
+      setFeedHasMore(photos.length === ROOM_POST_PAGE_SIZE);
     } catch (e: any) {
       console.error(e);
       setFeedError(e.message ?? "Something went wrong.");
@@ -553,27 +493,47 @@ export default function RoomThread() {
   const sunsetTopOpacity = sunsetAnim;
   const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
 
-  // Supabase realtime: floating overlay for incoming chat messages.
-  // Deferred until both overlayRoomId and myDeviceId are non-null to avoid
-  // a wasted subscribe-then-teardown cycle when either resolves async.
+  // Supabase realtime: incoming messages → chat overlay bubbles + live feed photos.
   useEffect(() => {
     if (!overlayRoomId || !myDeviceId) return;
 
     const channel = supabase
-      .channel("room-messages-overlay")
+      .channel("room-messages-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${overlayRoomId}` },
-        (payload: { new: ChatMessage }) => {
-          const msg = payload.new;
-          if (msg.device_id === myDeviceId) return;
-          const base: VisibleMessage = {
-            id: msg.id,
-            body: msg.body,
-            isPreset: msg.is_preset,
-            presetKey: msg.preset_key ?? undefined,
-          };
-          setVisibleMessages((prev) => [...prev.slice(-5), base]);
+        (payload: { new: Record<string, unknown> }) => {
+          const row = payload.new;
+          const senderId = (row.sender_device_id ?? row.device_id ?? "") as string;
+          if (senderId === myDeviceId) return;
+
+          const photoUrl = (row.photo_url ?? "") as string;
+          if (photoUrl.length > 0) {
+            const item: FeedPhoto = {
+              id: row.id as string,
+              room_id: row.room_id as string,
+              device_id: senderId,
+              photo_url: photoUrl,
+              created_at: row.created_at as string,
+              filter: (row.filter as string | null) ?? null,
+              adjustments: (row.adjustments as string | null) ?? null,
+            };
+            setPosts((prev) => {
+              if (prev.some((p) => p.id === item.id)) return prev;
+              return [item, ...prev];
+            });
+          }
+
+          const body = (row.body ?? "") as string;
+          if (body.length > 0) {
+            const base: VisibleMessage = {
+              id: row.id as string,
+              body,
+              isPreset: (row.is_preset as boolean) ?? false,
+              presetKey: (row.preset_key as string | null) ?? undefined,
+            };
+            setVisibleMessages((prev) => [...prev.slice(-5), base]);
+          }
         }
       )
       .subscribe();
@@ -781,15 +741,15 @@ export default function RoomThread() {
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
                 <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
-                  {item.signedUrl ? (
-                    <FeedImage uri={item.signedUrl} />
+                  {item.photo_url ? (
+                    <FeedImage uri={item.photo_url} />
                   ) : (
                     <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
                       <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
                     </View>
                   )}
 
-                  {/* Gradient overlay for caption area */}
+                  {/* Gradient overlay */}
                   <View
                     pointerEvents="none"
                     style={{
@@ -797,34 +757,10 @@ export default function RoomThread() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      height: (SCREEN_H - 140) * 0.28,
-                      backgroundColor: "rgba(0,0,0,0.45)",
+                      height: (SCREEN_H - 140) * 0.18,
+                      backgroundColor: "rgba(0,0,0,0.35)",
                     }}
                   />
-
-                  {/* Caption */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: 20,
-                      right: 20,
-                      bottom: 40,
-                    }}
-                  >
-                    {item.caption ? (
-                      <Text
-                        style={{
-                          fontSize: 18,
-                          fontWeight: "700",
-                          color: "white",
-                          textAlign: "left",
-                        }}
-                        numberOfLines={3}
-                      >
-                        {item.caption}
-                      </Text>
-                    ) : null}
-                  </View>
 
                   {/* Expiry countdown */}
                   <View
@@ -838,7 +774,7 @@ export default function RoomThread() {
                       backgroundColor: "rgba(0,0,0,0.55)",
                     }}
                   >
-                    <ExpiryCountdown expiresAtISO={item.expires_at} />
+                    <ExpiryCountdown expiresAtISO={new Date(new Date(item.created_at).getTime() + FEED_EXPIRY_MS).toISOString()} />
                   </View>
                 </View>
               )}

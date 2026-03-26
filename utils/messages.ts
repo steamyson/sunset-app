@@ -320,3 +320,40 @@ export async function sendMessage(params: SendMessageParams): Promise<ChatMessag
   return data as ChatMessage;
 }
 
+export type FeedPhoto = {
+  id: string;
+  room_id: string;
+  device_id: string;
+  photo_url: string;
+  created_at: string;
+  filter: string | null;
+  adjustments: string | null;
+};
+
+export async function getPhotosForRoom(
+  roomId: string,
+  range: { from: number; to: number } = { from: 0, to: 49 }
+): Promise<FeedPhoto[]> {
+  const cutoff = new Date(Date.now() - EXPIRY_MS).toISOString();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id, room_id, sender_device_id, photo_url, created_at, filter, adjustments")
+    .eq("room_id", roomId)
+    .neq("photo_url", "")
+    .not("photo_url", "is", null)
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .range(range.from, range.to);
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: row.id as string,
+    room_id: row.room_id as string,
+    device_id: row.sender_device_id as string,
+    photo_url: row.photo_url as string,
+    created_at: row.created_at as string,
+    filter: (row.filter as string | null) ?? null,
+    adjustments: (row.adjustments as string | null) ?? null,
+  }));
+}
+
