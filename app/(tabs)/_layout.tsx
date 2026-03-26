@@ -75,6 +75,20 @@ export default function TabLayout() {
         options={{
           title: "Chats",
           tabBarIcon: ({ focused }) => <TabIcon name="chatbubbles" focused={focused} />,
+          // Transparent so the Chats screen space/sky underlay fills the full window; icons stay on top.
+          tabBarStyle: {
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "transparent",
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowOpacity: 0,
+            paddingBottom: insets.bottom + 8,
+            paddingTop: 10,
+            height: tabBarHeight,
+          },
         }}
       />
       <Tabs.Screen

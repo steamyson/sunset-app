@@ -984,7 +984,12 @@ export default function ChatsScreen() {
   const skyScale = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 1], outputRange: [0.18, 0.55, 1], extrapolate: "clamp" });
   const skyOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [0, 0, 1], extrapolate: "clamp" });
   const globeOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.78], outputRange: [1, 1, 0], extrapolate: "clamp" });
-  const spaceBgOpacity = zoomLevel.interpolate({ inputRange: [0.18, 0.55, 0.8], outputRange: [1, 1, 0], extrapolate: "clamp" });
+  // Full-screen underlay: same spine as globe — space when globe visible, sky when not
+  const screenBgColor = zoomLevel.interpolate({
+    inputRange: [0.18, 0.55, 0.78],
+    outputRange: [colors.spaceBackdrop, colors.spaceBackdrop, colors.sky],
+    extrapolate: "clamp",
+  });
   const globeScale = zoomLevel.interpolate({ inputRange: [0.18, 0.35, 0.55], outputRange: [1.7, 1.0, 1.35], extrapolate: "clamp" });
 
   // Content area height for globe centering (full screen minus tab bar)
@@ -992,7 +997,14 @@ export default function ChatsScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+    <View style={{ flex: 1, backgroundColor: "transparent" }}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { zIndex: -1, backgroundColor: screenBgColor },
+        ]}
+      />
     <View style={{ flex: 1 }}>
 
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
@@ -1013,14 +1025,6 @@ export default function ChatsScreen() {
             }}
             {...sceneZoomResponder.panHandlers}
           >
-            <Animated.View
-              pointerEvents="none"
-              style={{
-                ...StyleSheet.absoluteFillObject,
-                backgroundColor: colors.spaceBackdrop,
-                opacity: spaceBgOpacity,
-              }}
-            />
             <Animated.View
               pointerEvents="box-none"
               style={{
