@@ -74,22 +74,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.skyGlow,
     opacity: 0.18,
   },
-  sunsetTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: SCREEN_H * 0.5,
-    backgroundColor: colors.sunsetTop,
-  },
-  sunsetBottom: {
-    position: "absolute",
-    top: SCREEN_H * 0.5,
-    left: 0,
-    right: 0,
-    height: SCREEN_H * 0.5,
-    backgroundColor: colors.sunsetBottom,
-  },
 });
 
 function formatCountdown(expiresAtISO: string): string {
@@ -110,52 +94,15 @@ function formatCountdown(expiresAtISO: string): string {
 }
 
 export default function RoomThread() {
-  const params = useLocalSearchParams<{ code: string; unread?: string; ox?: string; oy?: string; ow?: string; oh?: string }>();
+  const params = useLocalSearchParams<{ code: string; unread?: string }>();
   const code = params.code;
 
-  // Origin cloud frame (passed from chats.tsx for reverse-exit animation)
-  const originFrame = (
-    params.ox != null && params.oy != null && params.ow != null && params.oh != null
-  ) ? {
-    x: parseFloat(params.ox),
-    y: parseFloat(params.oy),
-    w: parseFloat(params.ow),
-    h: parseFloat(params.oh),
-  } : null;
-
-  // Reverse-exit overlay animated values (full-screen → cloud frame on back)
-  const exitLeft   = useRef(new Animated.Value(0)).current;
-  const exitTop    = useRef(new Animated.Value(0)).current;
-  const exitWidth  = useRef(new Animated.Value(SCREEN_W)).current;
-  const exitHeight = useRef(new Animated.Value(SCREEN_H)).current;
-  const exitRadius = useRef(new Animated.Value(16)).current;
-  const exitOpacity = useRef(new Animated.Value(0)).current;
-  const isExitingRef = useRef(false);
-
   const handleBack = useCallback(() => {
-    if (isExitingRef.current) return true; // prevent double-fire
-    isExitingRef.current = true;
-    if (!originFrame) { router.back(); return true; }
-    // Show overlay at full-screen, then spring it down to the cloud's origin frame
-    exitLeft.setValue(0);
-    exitTop.setValue(0);
-    exitWidth.setValue(SCREEN_W);
-    exitHeight.setValue(SCREEN_H);
-    exitRadius.setValue(16);
-    exitOpacity.setValue(1);
-    Animated.parallel([
-      Animated.spring(exitLeft,   { toValue: originFrame.x, tension: 65, friction: 22, useNativeDriver: false }),
-      Animated.spring(exitTop,    { toValue: originFrame.y, tension: 65, friction: 22, useNativeDriver: false }),
-      Animated.spring(exitWidth,  { toValue: originFrame.w, tension: 65, friction: 22, useNativeDriver: false }),
-      Animated.spring(exitHeight, { toValue: originFrame.h, tension: 65, friction: 22, useNativeDriver: false }),
-      Animated.spring(exitRadius, { toValue: 40,            tension: 65, friction: 22, useNativeDriver: false }),
-    ]).start(({ finished }) => {
-      if (finished) { router.back(); }
-    });
-    return true; // prevent Android default back
-  }, [originFrame, exitLeft, exitTop, exitWidth, exitHeight, exitRadius, exitOpacity]);
+    router.back();
+    return true;
+  }, []);
 
-  // Intercept Android hardware back to prevent default (animation completes before router.back)
+  // Intercept Android hardware back (same as header back)
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", handleBack);
     return () => sub.remove();
@@ -200,32 +147,94 @@ export default function RoomThread() {
   const [overlayRoomId, setOverlayRoomId] = useState<string | null>(null);
   const [locationMap, setLocationMap] = useState<Record<string, string>>({});
   const [particlesReady, setParticlesReady] = useState(false);
+  const [unreadFlashPending, setUnreadFlashPending] = useState(false);
+  /** First feed cover is prefetched so the sunset flash runs after the photo is ready (not only after URLs arrive). */
+  const [firstFeedImageReady, setFirstFeedImageReady] = useState(false);
 
-  // Check unread on mount: route param or SecureStore, run sunset flash if unread, then mark read
+  // Route param / SecureStore: arm one-shot flash only after content is visible (see effect below)
   useEffect(() => {
     let cancelled = false;
-    async function checkAndFlash() {
+    sunsetAnim.setValue(0);
+    async function checkUnreadFlag() {
       const unreadFromParam = params.unread === "true" || params.unread === "1";
       if (unreadFromParam) {
-        if (!cancelled) setTimeout(() => runSunsetFlash(() => markRoomRead(code)), 1000);
+        if (!cancelled) setUnreadFlashPending(true);
         return;
       }
       const raw = await getItem(UNREAD_PHOTOS_KEY);
       const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
-      if (map[code] === true && !cancelled) {
-        setTimeout(() => runSunsetFlash(() => markRoomRead(code)), 1000);
-      }
+      if (!cancelled) setUnreadFlashPending(map[code] === true);
     }
-    checkAndFlash();
+    checkUnreadFlag();
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, params.unread]);
+
+  useEffect(() => {
+    if (feedLoading) setFirstFeedImageReady(false);
+  }, [feedLoading]);
+
+  // Prefetch newest feed photo so flash waits for image bytes (FlatList may not mount on chat tab).
+  useEffect(() => {
+    if (feedLoading || posts.length === 0) return;
+    const url = posts[0]?.photo_url;
+    if (!url) {
+      setFirstFeedImageReady(true);
+      return;
+    }
+    let cancelled = false;
+    setFirstFeedImageReady(false);
+    Image.prefetch(url)
+      .then(() => {
+        if (!cancelled) setFirstFeedImageReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setFirstFeedImageReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [feedLoading, posts.length, posts[0]?.id, posts[0]?.photo_url]);
+
+  // Run warm glow only after feed + chat loads finish, first cover is ready when there is a feed, and content exists
+  useEffect(() => {
+    if (!unreadFlashPending || !code) return;
+    if (feedLoading || loading) return;
+    const hasContent = posts.length > 0 || messages.length > 0;
+    if (!hasContent) {
+      setUnreadFlashPending(false);
+      markRoomRead(code);
+      return;
+    }
+    const feedCoversReady = posts.length === 0 || firstFeedImageReady;
+    if (!feedCoversReady) return;
+    setUnreadFlashPending(false);
+    const handle = InteractionManager.runAfterInteractions(() => {
+      runSunsetFlash(() => markRoomRead(code));
+    });
+    return () => handle.cancel();
+  }, [
+    unreadFlashPending,
+    feedLoading,
+    loading,
+    posts.length,
+    messages.length,
+    firstFeedImageReady,
+    code,
+  ]);
 
   function runSunsetFlash(onComplete?: () => void) {
+    sunsetAnim.setValue(0);
     Animated.sequence([
       Animated.timing(sunsetAnim, {
-        toValue: 0.35,
+        toValue: 1,
         duration: 400,
         easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(sunsetAnim, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.linear,
         useNativeDriver: true,
       }),
       Animated.timing(sunsetAnim, {
@@ -490,9 +499,6 @@ export default function RoomThread() {
     } catch {}
   }
 
-  const sunsetTopOpacity = sunsetAnim;
-  const sunsetBottomOpacity = Animated.multiply(sunsetAnim, 0.6);
-
   // Supabase realtime: incoming messages → chat overlay bubbles + live feed photos.
   useEffect(() => {
     if (!overlayRoomId || !myDeviceId) return;
@@ -579,22 +585,34 @@ export default function RoomThread() {
   return (
     <ParticleTrail style={{ backgroundColor: colors.warmWhite }} disabled={!particlesReady}>
     <View style={styles.roomWrapper}>
-      {/* Sunset flash overlay (one-time when unread) */}
+      {/* Warm radial glow — one-time when unread, after content is visible */}
       <View
         style={[StyleSheet.absoluteFillObject, { zIndex: 10 }]}
         pointerEvents="none"
       >
         <Animated.View
-          style={[
-            styles.sunsetTop,
-            { opacity: sunsetTopOpacity },
-          ]}
+          style={{
+            position: "absolute",
+            width: SCREEN_W * 1.55,
+            height: SCREEN_W * 1.32,
+            borderRadius: (SCREEN_W * 1.55) / 2,
+            backgroundColor: colors.amber,
+            opacity: Animated.multiply(sunsetAnim, 0.26),
+            left: SCREEN_W * 0.5 - (SCREEN_W * 1.55) / 2,
+            top: SCREEN_H * 0.1,
+          }}
         />
         <Animated.View
-          style={[
-            styles.sunsetBottom,
-            { opacity: sunsetBottomOpacity },
-          ]}
+          style={{
+            position: "absolute",
+            width: SCREEN_W * 1.12,
+            height: SCREEN_W * 0.98,
+            borderRadius: (SCREEN_W * 1.12) / 2,
+            backgroundColor: colors.sunRayMid,
+            opacity: Animated.multiply(sunsetAnim, 0.34),
+            left: SCREEN_W * 0.5 - (SCREEN_W * 1.12) / 2,
+            top: SCREEN_H * 0.18,
+          }}
         />
       </View>
       {/* Cloud layer — behind messages, touches pass through */}
@@ -1066,21 +1084,6 @@ export default function RoomThread() {
         </View>
       )}
     </Modal>
-
-    {/* Reverse-exit overlay: warm-white shape shrinks back to cloud origin on back press */}
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        left: exitLeft,
-        top: exitTop,
-        width: exitWidth,
-        height: exitHeight,
-        borderRadius: exitRadius,
-        backgroundColor: colors.warmWhite,
-        opacity: exitOpacity,
-      }}
-    />
 
     </ParticleTrail>
   );

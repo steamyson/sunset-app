@@ -4,9 +4,9 @@ import { Text } from "./Text";
 import { colors } from "../utils/theme";
 import { forwardRef, useEffect, useRef } from "react";
 
-// Sunset color layers — used for unread pulse (bleed through semi-transparent cloud)
+// Sunset color layers — unread pulse on sky canvas (bleed through semi-transparent cloud)
 const SUNSET_ORANGE = "#FF8C42";
-const SUNSET_PINK   = "#FF6B9D";
+const SUNSET_PINK = "#FF6B9D";
 
 const VB_W = 240;
 const VB_H = 185; // tall enough that mirrored bottom bumps are never clipped
@@ -138,10 +138,10 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
   }, [unread]);
 
   // Scale pulses 1.0 → 1.12 → 1.0
-  const cloudScale    = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1.0, 1.12] });
+  const cloudScale = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1.0, 1.12] });
   // Orange peaks mid-cycle, pink peaks at the top — creates a color shift as it swells
   const orangeOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0.65, 0] });
-  const pinkOpacity   = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 0.55] });
+  const pinkOpacity = glowAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 0.55] });
 
   return (
     <View ref={ref} style={{ width, height }}>

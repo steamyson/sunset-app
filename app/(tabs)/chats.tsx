@@ -672,7 +672,7 @@ export default function ChatsScreen() {
   );
 
   // Camera-zoom toward cloud: scale the sky canvas up from the cloud's screen center, then navigate
-  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number, cloudFrame?: { x: number; y: number; w: number; h: number }) {
+  function zoomIntoCloud(room: Room, cloudCX: number, cloudCY: number) {
     if (isTapZoomingRef.current) return;
     isTapZoomingRef.current = true;
     // Hide the name label immediately so it doesn't scale up with the cloud.
@@ -700,15 +700,12 @@ export default function ChatsScreen() {
         const unread = unreadRooms.has(room.code);
         // Small delay lets the final animation frame render before the new screen mounts.
         setTimeout(() => {
-          const qp: string[] = [];
-          if (unread) qp.push("unread=true");
-          if (cloudFrame) qp.push(`ox=${cloudFrame.x}`, `oy=${cloudFrame.y}`, `ow=${cloudFrame.w}`, `oh=${cloudFrame.h}`);
-          const params: Record<string, string> = { code: room.code };
-          qp.forEach((part) => {
-            const [k, v] = part.split("=");
-            if (k && v) params[k] = v;
+          router.push({
+            pathname: "/room/[code]",
+            params: unread
+              ? { code: room.code, unread: "true" }
+              : { code: room.code },
           });
-          router.push({ pathname: "/room/[code]", params });
         }, 50);
       }
     });
@@ -903,7 +900,7 @@ export default function ChatsScreen() {
           // Zoom toward cloud center
           const cloudCX = mx + mw / 2;
           const cloudCY = my + mh / 2;
-          zoomIntoCloud(room, cloudCX, cloudCY, { x: mx, y: my, w: mw, h: mh });
+          zoomIntoCloud(room, cloudCX, cloudCY);
         });
       } else {
         // No ref — fallback to plain push
