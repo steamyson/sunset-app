@@ -104,6 +104,10 @@ function formatCountdown(expiresAtISO: string): string {
   return `${secs}s`;
 }
 
+function hasPhotoUrl(photoUrl: string | null | undefined): photoUrl is string {
+  return typeof photoUrl === "string" && photoUrl.trim().length > 0;
+}
+
 export default function RoomThread() {
   const params = useLocalSearchParams<{ code: string; unread?: string }>();
   const code = params.code;
@@ -126,7 +130,6 @@ export default function RoomThread() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState<"feed" | "chat">("feed");
 
   // Feed state
   const [feedLoading, setFeedLoading] = useState(true);
@@ -326,7 +329,7 @@ export default function RoomThread() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeCamera();
       const [msgs, reported] = await Promise.all([fetchRoomMessagesByCode(code), getReportedMessageIds()]);
-      const filtered = msgs.filter((m) => !reported.has(m.id));
+      const filtered = msgs.filter((m) => !reported.has(m.id) && hasPhotoUrl(m.photo_url));
       const sorted = [...filtered].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
@@ -418,7 +421,7 @@ export default function RoomThread() {
             getDeviceId(),
             getReportedMessageIds(),
           ]);
-          const filtered = cached.messages.filter((m) => !reported.has(m.id));
+          const filtered = cached.messages.filter((m) => !reported.has(m.id) && hasPhotoUrl(m.photo_url));
           const sorted = [...filtered].sort(
             (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           );
@@ -441,7 +444,7 @@ export default function RoomThread() {
         getDeviceId(),
         getReportedMessageIds(),
       ]);
-      const filtered = msgs.filter((m) => !reported.has(m.id));
+      const filtered = msgs.filter((m) => !reported.has(m.id) && hasPhotoUrl(m.photo_url));
       const sorted = [...filtered].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
@@ -736,215 +739,7 @@ export default function RoomThread() {
         </TouchableOpacity>
       </View>
 
-      {/* View toggle */}
-      <View
-        style={{
-          flexDirection: "row",
-          marginHorizontal: 20,
-          marginTop: 8,
-          marginBottom: 4,
-          borderRadius: 999,
-          backgroundColor: colors.mist,
-          padding: 3,
-        }}
-      >
-        {(["feed", "chat"] as const).map((mode) => (
-          <TouchableOpacity
-            key={mode}
-            onPress={() => setViewMode(mode)}
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              borderRadius: 999,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: viewMode === mode ? colors.charcoal : "transparent",
-            }}
-            activeOpacity={0.85}
-          >
-            <Text
-              style={{
-                fontSize: 13,
-                fontWeight: "700",
-                color: viewMode === mode ? colors.cream : colors.ash,
-              }}
-            >
-              {mode === "feed" ? "Feed" : "Chat"}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {viewMode === "feed" ? (
-        feedLoading ? (
-          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-        ) : feedError ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center", marginBottom: 8 }}>
-              Couldn&apos;t load this room
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.ash, textAlign: "center" }}>
-              {feedError}
-            </Text>
-          </View>
-        ) : posts.length === 0 ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
-            <Text style={{ fontSize: 52 }}>🌄</Text>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
-              No posts yet
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-              Capture your first sunset in this room to see it here.
-            </Text>
-          </View>
-        ) : (
-          <View style={{ flex: 1 }}>
-            <FlatList
-              data={posts}
-              keyExtractor={(item) => item.id}
-              pagingEnabled
-              snapToAlignment="center"
-              decelerationRate="fast"
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <View style={{ width: SCREEN_W, height: SCREEN_H - 140 }}>
-                  {item.photo_url ? (
-                    <FeedImage uri={thumbUrl(item.photo_url)} />
-                  ) : (
-                    <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ color: colors.charcoal }}>Unable to load photo</Text>
-                    </View>
-                  )}
-
-                  {/* Gradient overlay */}
-                  <View
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: (SCREEN_H - 140) * 0.18,
-                      backgroundColor: "rgba(0,0,0,0.35)",
-                    }}
-                  />
-
-                  {/* Expiry countdown */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 20,
-                      right: 16,
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 16,
-                      backgroundColor: "rgba(0,0,0,0.55)",
-                    }}
-                  >
-                    <ExpiryCountdown expiresAtISO={new Date(new Date(item.created_at).getTime() + FEED_EXPIRY_MS).toISOString()} />
-                  </View>
-                </View>
-              )}
-              ListFooterComponent={
-                feedHasMore ? (
-                  <View style={{ width: SCREEN_W, alignItems: "center", justifyContent: "center", paddingVertical: 22 }}>
-                    <TouchableOpacity
-                      onPress={() => loadFeed(false)}
-                      disabled={feedLoadingMore}
-                      style={{
-                        backgroundColor: colors.charcoal,
-                        borderRadius: 20,
-                        paddingHorizontal: 18,
-                        paddingVertical: 10,
-                        minWidth: 124,
-                        alignItems: "center",
-                      }}
-                    >
-                      {feedLoadingMore ? (
-                        <ActivityIndicator color={colors.cream} size="small" />
-                      ) : (
-                        <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                ) : null
-              }
-            />
-
-            {/* Floating overlay and input for feed view — independent of feed fetch; fades in when messages are ready */}
-            {loading && posts.length > 0 ? (
-              <View
-                pointerEvents="none"
-                style={{
-                  position: "absolute",
-                  bottom: 112,
-                  left: 0,
-                  right: 0,
-                  alignItems: "center",
-                }}
-              >
-                <ActivityIndicator color={colors.cream} size="small" />
-              </View>
-            ) : null}
-            <Animated.View
-              style={[StyleSheet.absoluteFillObject, { opacity: feedOverlayOpacity }]}
-              pointerEvents={loading ? "none" : "box-none"}
-            >
-              <MessageOverlay
-                messages={visibleMessages}
-                onExpire={(id) =>
-                  setVisibleMessages((prev) => prev.filter((m) => m.id !== id))
-                }
-              />
-              <ChatInputBar
-                disabled={!roomIdRef.current || !myDeviceId}
-                onSendMessage={async (body) => {
-                  if (!roomIdRef.current || !myDeviceId) return;
-                  try {
-                    const msg = await sendMessage({
-                      roomId: roomIdRef.current,
-                      deviceId: myDeviceId,
-                      body,
-                      location: locationRef.current,
-                    });
-                    const overlay: VisibleMessage = {
-                      id: msg.id,
-                      body: msg.body,
-                      isPreset: msg.is_preset,
-                      presetKey: msg.preset_key ?? undefined,
-                    };
-                    setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
-                  } catch (e) {
-                    console.error("sendMessage failed", e);
-                  }
-                }}
-                onSendPreset={async (presetKey) => {
-                  if (!roomIdRef.current || !myDeviceId) return;
-                  try {
-                    const msg = await sendMessage({
-                      roomId: roomIdRef.current,
-                      deviceId: myDeviceId,
-                      body: presetKey,
-                      isPreset: true,
-                      presetKey,
-                      location: locationRef.current,
-                    });
-                    const overlay: VisibleMessage = {
-                      id: msg.id,
-                      body: msg.body,
-                      isPreset: msg.is_preset,
-                      presetKey: msg.preset_key ?? undefined,
-                    };
-                    setVisibleMessages((prev) => [...prev.slice(-5), overlay]);
-                  } catch (e) {
-                    console.error("sendMessage preset failed", e);
-                  }
-                }}
-              />
-            </Animated.View>
-          </View>
-        )
-      ) : loading ? (
+      {loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : loadError ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
@@ -1208,6 +1003,7 @@ function MessageBubble({
   location: string | null;
 }) {
   const expired = isExpired(message);
+  if (expired) return null;
   const expiresInH = Math.max(
     0,
     24 - (Date.now() - new Date(message.created_at).getTime()) / 3600000
@@ -1232,70 +1028,50 @@ function MessageBubble({
         <Text style={{ fontSize: 11, color: colors.ash }}>{timeAgo(message.created_at)}</Text>
       </View>
 
-      {/* Photo or expired placeholder */}
-      {expired ? (
+      <TouchableOpacity
+        onLongPress={isMe ? undefined : onReport}
+        activeOpacity={1}
+        delayLongPress={600}
+        style={{ ...cloudShape(message.id), overflow: "hidden" }}
+      >
+        <FilteredImage
+          uri={message.photo_url}
+          filter={message.filter}
+          adjustments={message.adjustments ? JSON.parse(message.adjustments) : null}
+          width={SCREEN_W - 32}
+          height={(SCREEN_W - 32) * 1.1}
+        />
+        {/* Location badge */}
+        {location && (
+          <View style={{
+            position: "absolute", top: 10, left: 10,
+            backgroundColor: "rgba(0,0,0,0.45)",
+            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+            flexDirection: "row", alignItems: "center", gap: 4,
+          }}>
+            <Text style={{ color: "white", fontSize: 11 }}>📍</Text>
+            <Text style={{ color: "white", fontSize: 11, fontWeight: "600" }}>{location}</Text>
+          </View>
+        )}
+        {/* Expiry badge */}
         <View style={{
-          width: SCREEN_W - 32, height: 200,
-          ...cloudShape(message.id), backgroundColor: colors.mist,
-          alignItems: "center", justifyContent: "center",
-          borderWidth: 1, borderColor: colors.ash + "44",
+          position: "absolute", bottom: 12, right: 12,
+          backgroundColor: expiresInH < 3 ? `${colors.magenta}dd` : "rgba(0,0,0,0.45)",
+          paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16,
         }}>
-          <Text style={{ fontSize: 32 }}>🌅</Text>
-          <Text style={{ fontSize: 14, fontWeight: "600", color: colors.ash, marginTop: 10 }}>
-            This sunset has passed
-          </Text>
-          <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4 }}>
-            Photos expire after 24 hours
+          <Text style={{ color: "white", fontSize: 11, fontWeight: "600" }}>
+            {expiresInH < 1 ? "< 1h left" : `${expiresInH.toFixed(0)}h left`}
           </Text>
         </View>
-      ) : (
-        <TouchableOpacity
-          onLongPress={isMe ? undefined : onReport}
-          activeOpacity={1}
-          delayLongPress={600}
-          style={{ ...cloudShape(message.id), overflow: "hidden" }}
-        >
-          <FilteredImage
-            uri={message.photo_url}
-            filter={message.filter}
-            adjustments={message.adjustments ? JSON.parse(message.adjustments) : null}
-            width={SCREEN_W - 32}
-            height={(SCREEN_W - 32) * 1.1}
-          />
-          {/* Location badge */}
-          {location && (
-            <View style={{
-              position: "absolute", top: 10, left: 10,
-              backgroundColor: "rgba(0,0,0,0.45)",
-              paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
-              flexDirection: "row", alignItems: "center", gap: 4,
-            }}>
-              <Text style={{ color: "white", fontSize: 11 }}>📍</Text>
-              <Text style={{ color: "white", fontSize: 11, fontWeight: "600" }}>{location}</Text>
-            </View>
-          )}
-          {/* Expiry badge */}
-          <View style={{
-            position: "absolute", bottom: 12, right: 12,
-            backgroundColor: expiresInH < 3 ? `${colors.magenta}dd` : "rgba(0,0,0,0.45)",
-            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16,
-          }}>
-            <Text style={{ color: "white", fontSize: 11, fontWeight: "600" }}>
-              {expiresInH < 1 ? "< 1h left" : `${expiresInH.toFixed(0)}h left`}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      )}
+      </TouchableOpacity>
 
       {/* Reactions */}
-      {!expired && (
-        <ReactionBar
-          messageId={message.id}
-          deviceId={deviceId}
-          reactions={reactions}
-          onUpdate={onReactionUpdate}
-        />
-      )}
+      <ReactionBar
+        messageId={message.id}
+        deviceId={deviceId}
+        reactions={reactions}
+        onUpdate={onReactionUpdate}
+      />
     </View>
   );
 }

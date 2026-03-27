@@ -257,6 +257,8 @@ export async function fetchRoomMessagesByCode(
     .from("messages")
     .select("*")
     .eq("room_id", roomId)
+    .neq("photo_url", "")
+    .not("photo_url", "is", null)
     .gte("created_at", cutoff)
     .order("created_at", { ascending: true })
     .range(range.from, range.to);
