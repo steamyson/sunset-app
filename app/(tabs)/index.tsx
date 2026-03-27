@@ -1,6 +1,6 @@
 import {
   View,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
@@ -65,9 +65,8 @@ export default function FeedScreen() {
       roomIdsRef.current = roomIds;
       const from = reset ? 0 : messages.length;
       const range = { from, to: from + FEED_PAGE_SIZE - 1 };
-      const [msgs, sunset, reported, myDeviceId] = await Promise.all([
+      const [msgs, reported, myDeviceId] = await Promise.all([
         fetchAllMyMessages(roomIds, range),
-        fetchSunsetTime(),
         getReportedMessageIds(),
         getDeviceId(),
       ]);
@@ -77,7 +76,6 @@ export default function FeedScreen() {
         : [...messages, ...filtered.filter((m) => !messages.some((prev) => prev.id === m.id))];
       setMessages(merged);
       setHasMore(filtered.length === FEED_PAGE_SIZE);
-      if (sunset) setSunsetLabel(sunset.formattedLocal);
       if (myDeviceId) setDeviceId(myDeviceId);
 
       const uniqueSenders = [...new Set(merged.map((m) => m.sender_device_id))];
@@ -89,22 +87,35 @@ export default function FeedScreen() {
       setSenderNames(names);
       setReactions(rxns);
 
+      // Primary data ready — dismiss spinner now
+      if (reset) {
+        setLoading(false);
+        hasLoadedRef.current = true;
+      } else {
+        setLoadingMore(false);
+      }
+
+      // Background: sunset time and geocoding hydrate after initial render
+      fetchSunsetTime().then((sunset) => {
+        if (sunset) setSunsetLabel(sunset.formattedLocal);
+      }).catch(() => {});
+
       const withCoords = merged.filter((m) => m.lat && m.lng);
       if (withCoords.length > 0) {
-        const geoResults = await Promise.all(
+        Promise.all(
           withCoords.map(async (m) => ({
             id: m.id,
             location: await reverseGeocode(m.lat!, m.lng!),
           }))
-        );
-        const locMap: Record<string, string> = {};
-        for (const r of geoResults) locMap[r.id] = r.location;
-        setLocationMap(locMap);
+        ).then((geoResults) => {
+          const locMap: Record<string, string> = {};
+          for (const r of geoResults) locMap[r.id] = r.location;
+          setLocationMap(locMap);
+        }).catch(() => {});
       }
     } catch (e: any) {
       console.error(e);
       setLoadError(e?.message ?? "Could not load your feed.");
-    } finally {
       if (reset) {
         setLoading(false);
         hasLoadedRef.current = true;
@@ -182,83 +193,92 @@ export default function FeedScreen() {
       />
 
       <SafeAreaView style={{ flex: 1 }}>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 16 }}>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <View style={{ flex: 1 }} />
-            <View style={{ alignItems: "center" }}>
-              <Text style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -1 }}>
-                Dusk
-              </Text>
-              <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4 }}>
-                golden hour, shared together
-              </Text>
-            </View>
-            <View style={{ flex: 1, alignItems: "flex-end" }}>
-              {sunsetLabel && (
-                <View style={{
-                  backgroundColor: colors.mist,
-                  paddingHorizontal: 14, paddingVertical: 8,
-                  ...cloudShape(2),
-                  flexDirection: "row", alignItems: "center", gap: 6,
-                }}>
-                  <Text style={{ fontSize: 14 }}>🌇</Text>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.charcoal }}>
-                    {sunsetLabel}
+        <FlatList
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          data={loading || loadError || messages.length === 0 ? [] : messages}
+          keyExtractor={(item) => item.id}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          renderItem={({ item: msg }) => (
+            <PhotoCard
+              message={msg}
+              senderName={senderNames[msg.sender_device_id]}
+              reactions={reactions[msg.id] ?? {}}
+              deviceId={deviceId}
+              onReport={() => handleReport(msg.id)}
+              onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
+              location={locationMap[msg.id] ?? null}
+            />
+          )}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          ListHeaderComponent={
+            <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ flex: 1 }} />
+                <View style={{ alignItems: "center" }}>
+                  <Text style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -1 }}>
+                    Dusk
+                  </Text>
+                  <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4 }}>
+                    golden hour, shared together
+                  </Text>
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  {sunsetLabel && (
+                    <View style={{
+                      backgroundColor: colors.mist,
+                      paddingHorizontal: 14, paddingVertical: 8,
+                      ...cloudShape(2),
+                      flexDirection: "row", alignItems: "center", gap: 6,
+                    }}>
+                      <Text style={{ fontSize: 14 }}>🌇</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.charcoal }}>
+                        {sunsetLabel}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+              {loading && (
+                <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
+              )}
+              {!loading && loadError && (
+                <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
+                  <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
+                    Couldn&apos;t load your feed
+                  </Text>
+                  <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+                    {loadError}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setLoading(true);
+                      setHasMore(true);
+                      load(true);
+                    }}
+                    style={{ marginTop: 16, backgroundColor: colors.charcoal, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 }}
+                  >
+                    <Text style={{ color: colors.cream, fontWeight: "700" }}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {!loading && !loadError && messages.length === 0 && (
+                <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
+                  <Text style={{ fontSize: 64 }}>🌅</Text>
+                  <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
+                    Your feed awaits
+                  </Text>
+                  <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+                    Tap the 📷 button to capture a sunset and share it with your rooms.
                   </Text>
                 </View>
               )}
             </View>
-          </View>
-        </View>
-
-        {loading ? (
-          <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-        ) : loadError ? (
-          <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
-              Couldn&apos;t load your feed
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-              {loadError}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setLoading(true);
-                setHasMore(true);
-                load(true);
-              }}
-              style={{ marginTop: 16, backgroundColor: colors.charcoal, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 }}
-            >
-              <Text style={{ color: colors.cream, fontWeight: "700" }}>Try Again</Text>
-            </TouchableOpacity>
-          </View>
-        ) : messages.length === 0 ? (
-          <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
-            <Text style={{ fontSize: 64 }}>🌅</Text>
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
-              Your feed awaits
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-              Tap the 📷 button to capture a sunset and share it with your rooms.
-            </Text>
-          </View>
-        ) : (
-          <View style={{ paddingBottom: 32 }}>
-            {messages.map((msg) => (
-              <PhotoCard
-                key={msg.id}
-                message={msg}
-                senderName={senderNames[msg.sender_device_id]}
-                reactions={reactions[msg.id] ?? {}}
-                deviceId={deviceId}
-                onReport={() => handleReport(msg.id)}
-                onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
-                location={locationMap[msg.id] ?? null}
-              />
-            ))}
-            {hasMore && (
+          }
+          ListFooterComponent={
+            hasMore ? (
               <View style={{ alignItems: "center", marginTop: 4 }}>
                 <TouchableOpacity
                   onPress={loadMore}
@@ -279,10 +299,9 @@ export default function FeedScreen() {
                   )}
                 </TouchableOpacity>
               </View>
-            )}
-          </View>
-        )}
-      </ScrollView>
+            ) : null
+          }
+        />
       </SafeAreaView>
     </ParticleTrail>
   );

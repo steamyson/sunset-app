@@ -284,17 +284,21 @@ export default function ChatsScreen() {
       ]);
       setRooms(roomList);
       setNicknames(nameMap);
-      const latestTimes = await fetchLatestMessageTimes(roomList.map((r) => r.id));
-      const unread = new Set<string>();
-      for (const room of roomList) {
-        const latest = latestTimes[room.id];
-        const seen = lastSeenMap[room.code];
-        if (latest && (!seen || latest > seen)) unread.add(room.code);
-      }
-      setUnreadRooms(unread);
+      setLoading(false);
+      hasLoadedRef.current = true;
+
+      // Background: unread dots hydrate after rooms are visible
+      fetchLatestMessageTimes(roomList.map((r) => r.id)).then((latestTimes) => {
+        const unread = new Set<string>();
+        for (const room of roomList) {
+          const latest = latestTimes[room.id];
+          const seen = lastSeenMap[room.code];
+          if (latest && (!seen || latest > seen)) unread.add(room.code);
+        }
+        setUnreadRooms(unread);
+      }).catch(() => {});
     } catch (e) {
       console.error(e);
-    } finally {
       setLoading(false);
       hasLoadedRef.current = true;
     }

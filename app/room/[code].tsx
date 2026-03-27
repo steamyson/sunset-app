@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, type Message, type FeedPhoto } from "../../utils/messages";
+import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../utils/messages";
 import { getAlias } from "../../utils/aliases";
 import { getRoomNickname } from "../../utils/nicknames";
 import { getNicknames } from "../../utils/identity";
@@ -369,22 +369,15 @@ export default function RoomThread() {
         }
       }
 
-      const { data: room, error: roomErr } = await supabase
-        .from("rooms")
-        .select("id")
-        .eq("code", code.toUpperCase())
-        .maybeSingle();
-
-      if (roomErr) throw new Error(roomErr.message);
-      if (!room) throw new Error("Room not found.");
+      const roomId = await getRoomId(code);
 
       const from = reset ? 0 : posts.length;
-      const photos = await getPhotosForRoom(room.id, {
+      const photos = await getPhotosForRoom(roomId, {
         from,
         to: from + ROOM_POST_PAGE_SIZE - 1,
       });
-      roomIdRef.current = room.id;
-      setOverlayRoomId(room.id);
+      roomIdRef.current = roomId;
+      setOverlayRoomId(roomId);
 
       const listForPrefetch = reset
         ? photos
@@ -468,28 +461,30 @@ export default function RoomThread() {
       setReactions(rxns);
       setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
       setLastSeen(code).catch(() => {});
+      if (reset) setLoading(false);
 
+      // Background: geocode after primary data is visible
       const withCoords = merged.filter((m) => m.lat && m.lng);
       if (withCoords.length > 0) {
-        const geoResults = await Promise.all(
+        Promise.all(
           withCoords.map(async (m) => ({
             id: m.id,
             location: await reverseGeocode(m.lat!, m.lng!),
           }))
-        );
-        const locMap: Record<string, string> = {};
-        for (const r of geoResults) locMap[r.id] = r.location;
-        setLocationMap(locMap);
+        ).then((geoResults) => {
+          const locMap: Record<string, string> = {};
+          for (const r of geoResults) locMap[r.id] = r.location;
+          setLocationMap(locMap);
+        }).catch(() => {});
       }
     } catch (e: any) {
       console.error(e);
       if (reset) {
         setLoadError(e.message ?? "Failed to load room messages.");
+        setLoading(false);
       }
     } finally {
-      if (reset) {
-        setLoading(false);
-      } else {
+      if (!reset) {
         setChatLoadingMore(false);
       }
     }

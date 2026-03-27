@@ -9,6 +9,14 @@ import { base64ToArrayBuffer } from "./encoding";
 
 const REPORTS_STORAGE_KEY = "dusk_reported_message_ids";
 
+// ─── Reported messages cache (60s TTL) ───────────────────────────────────────
+let reportedCache: { ids: string[]; ts: number } | null = null;
+const REPORTED_TTL = 60_000;
+
+export function clearReportedCache(): void {
+  reportedCache = null;
+}
+
 export async function reportMessage(messageId: string): Promise<void> {
   const deviceId = await getDeviceId();
   const raw = await getItem(REPORTS_STORAGE_KEY);
@@ -24,20 +32,45 @@ export async function reportMessage(messageId: string): Promise<void> {
     // Keep local fallback so the report still hides content on this device.
     console.warn("reportMessage rpc failed", error.message);
   }
+  clearReportedCache();
 }
 
 export async function getReportedMessageIds(): Promise<Set<string>> {
+  if (reportedCache && Date.now() - reportedCache.ts < REPORTED_TTL) {
+    return new Set(reportedCache.ids);
+  }
   const deviceId = await getDeviceId();
   const { data, error } = await supabase
     .from("reports")
     .select("message_id")
     .eq("reporter_device_id", deviceId);
   if (!error && data) {
-    return new Set(data.map((row) => row.message_id as string));
+    const ids = data.map((row) => row.message_id as string);
+    reportedCache = { ids, ts: Date.now() };
+    return new Set(ids);
   }
 
   const raw = await getItem(REPORTS_STORAGE_KEY);
-  return new Set(raw ? JSON.parse(raw) : []);
+  const ids: string[] = raw ? JSON.parse(raw) : [];
+  reportedCache = { ids, ts: Date.now() };
+  return new Set(ids);
+}
+
+// ─── Room ID cache ────────────────────────────────────────────────────────────
+const roomIdCache = new Map<string, string>();
+
+export async function getRoomId(code: string): Promise<string> {
+  const key = code.toUpperCase();
+  const cached = roomIdCache.get(key);
+  if (cached) return cached;
+  const { data, error } = await supabase
+    .from("rooms")
+    .select("id")
+    .eq("code", key)
+    .maybeSingle();
+  if (error || !data) throw new Error(error?.message ?? "Room not found.");
+  roomIdCache.set(key, data.id as string);
+  return data.id as string;
 }
 
 export type Message = {
@@ -215,15 +248,7 @@ export async function fetchRoomMessagesByCode(
   code: string,
   range: { from: number; to: number } = { from: 0, to: 99 }
 ): Promise<Message[]> {
-  // Fetch the room first
-  const { data: room, error: roomErr } = await supabase
-    .from("rooms")
-    .select("id")
-    .eq("code", code.toUpperCase())
-    .maybeSingle();
-
-  if (roomErr) throw new Error(roomErr.message);
-  if (!room) throw new Error("Room not found.");
+  const roomId = await getRoomId(code);
 
   // Fetch messages from last 48h so expired ones show as placeholders
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
@@ -231,7 +256,7 @@ export async function fetchRoomMessagesByCode(
   const { data, error } = await supabase
     .from("messages")
     .select("*")
-    .eq("room_id", room.id)
+    .eq("room_id", roomId)
     .gte("created_at", cutoff)
     .order("created_at", { ascending: true })
     .range(range.from, range.to);
