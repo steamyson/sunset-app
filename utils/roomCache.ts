@@ -1,7 +1,6 @@
-import { supabase } from "./supabase";
 import { fetchMyRooms } from "./rooms";
 import type { Room } from "./supabase";
-import { getPhotosForRoom, fetchRoomMessagesByCode, type FeedPhoto, type Message } from "./messages";
+import { getPhotosForRoom, fetchRoomMessagesByCode, getRoomId, type FeedPhoto, type Message } from "./messages";
 import { getNicknames } from "./identity";
 import { fetchReactions, type MessageReactions } from "./reactions";
 
@@ -60,14 +59,8 @@ export async function prefetchRoom(code: string): Promise<void> {
   if (inFlight.has(code)) return;
   inFlight.add(code);
   try {
-    const { data: room, error: roomErr } = await supabase
-      .from("rooms")
-      .select("id")
-      .eq("code", code.toUpperCase())
-      .maybeSingle();
-    if (roomErr || !room) return;
+    const roomId = await getRoomId(code);
 
-    const roomId = room.id as string;
     const [posts, messages] = await Promise.all([
       getPhotosForRoom(roomId, { from: 0, to: 11 }),
       fetchRoomMessagesByCode(code, { from: 0, to: 39 }),

@@ -26,7 +26,7 @@ const WINDOW_BEFORE_MS = 90 * 60_000;
 const WINDOW_AFTER_MS = 45 * 60_000;
 
 /** Set to `false` before release — skips golden-hour gate on the main camera screen only. */
-export const UNLOCK_CAMERA_FOR_TESTING = true;
+export const UNLOCK_CAMERA_FOR_TESTING = false;
 
 export function isWithinGoldenHour(sunsetTime: Date): boolean {
   const now = Date.now();
@@ -96,15 +96,26 @@ export async function getExpiresAt(lat: number, lng: number): Promise<{ expires_
   return { expires_at, sunset_date };
 }
 
+let memSunsetCache: { date: string; info: SunsetInfo } | null = null;
+
 export async function fetchSunsetTime(): Promise<SunsetInfo | null> {
   try {
-    // Check cache for today
+    const today = todayString();
+
+    // In-memory cache — instant return for repeat calls in same session
+    if (memSunsetCache && memSunsetCache.date === today) {
+      return memSunsetCache.info;
+    }
+
+    // Check disk cache for today
     const raw = await getItem(CACHE_KEY);
     if (raw) {
       const cached: CacheEntry = JSON.parse(raw);
-      if (cached.date === todayString()) {
+      if (cached.date === today) {
         const sunsetTime = new Date(cached.sunsetISO);
-        return { sunsetTime, formattedLocal: formatSunsetTime(sunsetTime) };
+        const info = { sunsetTime, formattedLocal: formatSunsetTime(sunsetTime) };
+        memSunsetCache = { date: today, info };
+        return info;
       }
     }
 
@@ -125,11 +136,13 @@ export async function fetchSunsetTime(): Promise<SunsetInfo | null> {
     if (json.status !== "OK") return null;
 
     const sunsetTime = new Date(json.results.sunset);
+    const info = { sunsetTime, formattedLocal: formatSunsetTime(sunsetTime) };
 
-    // Cache it
-    await setItem(CACHE_KEY, JSON.stringify({ date: todayString(), sunsetISO: sunsetTime.toISOString() }));
+    // Cache to disk and memory
+    memSunsetCache = { date: today, info };
+    await setItem(CACHE_KEY, JSON.stringify({ date: today, sunsetISO: sunsetTime.toISOString() }));
 
-    return { sunsetTime, formattedLocal: formatSunsetTime(sunsetTime) };
+    return info;
   } catch (e) {
     console.error("fetchSunsetTime error:", e);
     return null;

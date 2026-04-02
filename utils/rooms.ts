@@ -6,6 +6,8 @@ import { invalidateRoomCache } from "./roomCache";
 
 const LOCAL_ROOMS_KEY = "dusk_rooms";
 
+let cachedLocalCodes: string[] | null = null;
+
 function generateCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({ length: 6 }, () =>
@@ -14,13 +16,21 @@ function generateCode(): string {
 }
 
 export async function getLocalRoomCodes(): Promise<string[]> {
+  if (cachedLocalCodes) return cachedLocalCodes;
   const raw = await getItem(LOCAL_ROOMS_KEY);
-  return raw ? JSON.parse(raw) : [];
+  const codes: string[] = raw ? JSON.parse(raw) : [];
+  cachedLocalCodes = codes;
+  return codes;
+}
+
+function invalidateLocalCodesCache() {
+  cachedLocalCodes = null;
 }
 
 export async function addLocalRoomCode(code: string) {
   const codes = await getLocalRoomCodes();
   if (!codes.includes(code)) {
+    invalidateLocalCodesCache();
     await setItem(LOCAL_ROOMS_KEY, JSON.stringify([...codes, code]));
   }
 }
@@ -98,6 +108,7 @@ export async function setRoomNickname(code: string, nickname: string) {
 
 export async function removeLocalRoomCode(code: string): Promise<void> {
   const codes = await getLocalRoomCodes();
+  invalidateLocalCodesCache();
   await setItem(LOCAL_ROOMS_KEY, JSON.stringify(codes.filter((c) => c !== code)));
 }
 

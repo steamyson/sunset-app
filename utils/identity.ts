@@ -20,19 +20,40 @@ export async function syncDeviceToSupabase(
     .upsert({ device_id: deviceId, nickname: nickname.trim() });
 }
 
+// In-memory nickname cache (short TTL — nicknames rarely change)
+const nicknameCache: Record<string, { name: string; ts: number }> = {};
+const NICKNAME_TTL = 60_000;
+
 // Returns a map of deviceId → nickname for all known devices
 export async function getNicknames(
   deviceIds: string[]
 ): Promise<Record<string, string>> {
   if (!deviceIds.length) return {};
-  const { data } = await supabase
-    .from("devices")
-    .select("device_id, nickname")
-    .in("device_id", deviceIds);
 
-  const map: Record<string, string> = {};
-  for (const row of data ?? []) {
-    map[row.device_id] = row.nickname;
+  const now = Date.now();
+  const result: Record<string, string> = {};
+  const uncached: string[] = [];
+
+  for (const id of deviceIds) {
+    const entry = nicknameCache[id];
+    if (entry && now - entry.ts < NICKNAME_TTL) {
+      result[id] = entry.name;
+    } else {
+      uncached.push(id);
+    }
   }
-  return map;
+
+  if (uncached.length > 0) {
+    const { data } = await supabase
+      .from("devices")
+      .select("device_id, nickname")
+      .in("device_id", uncached);
+
+    for (const row of data ?? []) {
+      result[row.device_id] = row.nickname;
+      nicknameCache[row.device_id] = { name: row.nickname, ts: now };
+    }
+  }
+
+  return result;
 }
