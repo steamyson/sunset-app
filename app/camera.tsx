@@ -53,6 +53,7 @@ export default function CameraScreen() {
   const [exposure, setExposure] = useState(0);
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const [showGrid, setShowGrid] = useState(false);
+  const capturingRef = useRef(false);
   const cameraRef = useRef<Camera>(null);
 
   const sliderY = useRef(new Animated.Value(SLIDER_H / 2)).current;
@@ -128,15 +129,22 @@ export default function CameraScreen() {
   }
 
   async function takePicture() {
-    if (!cameraRef.current) return;
-    const result: PhotoFile = await cameraRef.current.takePhoto({
-      flash: flash === "off" ? "off" : "on",
-      enableShutterSound: false,
-    });
-    if (result?.path) {
-      const uri = Platform.OS === "android" ? "file://" + result.path : result.path;
-      setRawPhoto(uri);
-      setShowCrop(true);
+    if (!cameraRef.current || capturingRef.current) return;
+    capturingRef.current = true;
+    try {
+      const result: PhotoFile = await cameraRef.current.takePhoto({
+        flash: flash === "off" ? "off" : "on",
+        enableShutterSound: false,
+      });
+      if (result?.path) {
+        const uri = Platform.OS === "android" ? "file://" + result.path : result.path;
+        setRawPhoto(uri);
+        setShowCrop(true);
+      }
+    } catch (e) {
+      console.warn("takePhoto failed:", e);
+    } finally {
+      capturingRef.current = false;
     }
   }
 
@@ -350,7 +358,7 @@ export default function CameraScreen() {
         <Camera
           ref={cameraRef}
           device={device}
-          isActive={true}
+          isActive={!rawPhoto && !photo}
           photo={true}
           style={{ flex: 1 }}
           exposure={exposure}

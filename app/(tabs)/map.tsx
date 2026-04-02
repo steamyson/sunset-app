@@ -7,6 +7,7 @@ import {
   ScrollView,
   Dimensions,
   Platform,
+  Linking,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -25,12 +26,13 @@ import { useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { fetchMessagesWithLocation, type Message } from "../../utils/messages";
+import { fetchMessagesWithLocation, thumbUrl, type Message } from "../../utils/messages";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
 import { colors } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
+import { FilteredImage } from "../../components/FilteredImage";
 
 const SCREEN_W = Dimensions.get("window").width;
 const MAP_PAGE_SIZE = 100;
@@ -147,10 +149,12 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
             {messages.map((msg) => (
               <View key={msg.id} style={{ width: SCREEN_W, paddingHorizontal: 16, paddingTop: 16 }}>
                 <View style={{ borderRadius: 18, overflow: "hidden", borderWidth: 1.5, borderColor: colors.mist }}>
-                  <Image
-                    source={{ uri: msg.photo_url }}
-                    style={{ width: PHOTO_W, height: PHOTO_W * 0.9 }}
-                    resizeMode="cover"
+                  <FilteredImage
+                    uri={msg.photo_url}
+                    filter={msg.filter}
+                    adjustments={msg.adjustments ? JSON.parse(msg.adjustments) : null}
+                    width={PHOTO_W}
+                    height={PHOTO_W * 0.9}
                   />
                 </View>
               </View>
@@ -222,6 +226,11 @@ function NativeMap({ messages, myCoords }: {
   };
 
   const clusters = useMemo(() => clusterMessages(messages), [messages]);
+
+  // Reset auto-fit when messages change (e.g. mode toggle) so map re-centers
+  useEffect(() => {
+    hasAutoFitRef.current = false;
+  }, [messages]);
 
   useEffect(() => {
     if (!mapReady || clusters.length === 0 || hasAutoFitRef.current || !mapRef.current) return;
@@ -299,7 +308,7 @@ function NativeMap({ messages, myCoords }: {
                 shadowRadius: 6,
                 elevation: 6,
               }}>
-                <Image source={{ uri: cluster.messages[0].photo_url }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                <Image source={{ uri: thumbUrl(cluster.messages[0].photo_url, 96) }} style={{ width: 48, height: 48 }} resizeMode="cover" />
               </View>
               {/* Count badge — only at city scale, in normal flow so nothing clips it */}
               {cluster.messages.length > 1 && zoomedIn && (
@@ -432,6 +441,12 @@ export default function MapScreen() {
           <Text style={{ fontSize: 14, color: colors.ash, marginTop: 10, textAlign: "center", lineHeight: 22 }}>
             Dusk uses your location to pin sunsets on the map and show you what's been caught nearby — it's never shared without your knowledge.
           </Text>
+          <TouchableOpacity
+            onPress={() => Linking.openSettings()}
+            style={{ marginTop: 20, backgroundColor: colors.ember, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 18 }}
+          >
+            <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Open Settings</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
