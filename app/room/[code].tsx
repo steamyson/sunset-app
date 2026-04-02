@@ -1,6 +1,5 @@
 import {
   View,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
@@ -49,6 +48,7 @@ import { ChatInputBar } from "../../components/ChatInputBar";
 import { sendMessage, type ChatMessage } from "../../utils/messages";
 import * as Location from "expo-location";
 import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../../utils/cameraFlow";
+import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../../utils/sunset";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -153,6 +153,7 @@ export default function RoomThread() {
   const [sending, setSending]             = useState(false);
   const [sendError, setSendError]         = useState<string | null>(null);
   const [permission, requestPermission]   = useCameraPermissions();
+  const capturingRef = useRef(false);
   const cameraRef = useRef<CameraView>(null);
   const sunsetAnim = useRef(new Animated.Value(0)).current;
   const roomIdRef = useRef<string | null>(null);
@@ -282,8 +283,16 @@ export default function RoomThread() {
   }
 
   async function takePicture() {
-    const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
-    if (result?.uri) { setRawPhoto(result.uri); setShowCrop(true); }
+    if (capturingRef.current) return;
+    capturingRef.current = true;
+    try {
+      const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
+      if (result?.uri) { setRawPhoto(result.uri); setShowCrop(true); }
+    } catch (e) {
+      console.warn("takePicture failed:", e);
+    } finally {
+      capturingRef.current = false;
+    }
   }
 
   async function handleSend() {
@@ -431,6 +440,7 @@ export default function RoomThread() {
           setSenderNames(cached.nicknames);
           setReactions(cached.reactions);
           setChatHasMore(filtered.length >= ROOM_CHAT_PAGE_SIZE);
+          setLoading(false);
           setLastSeen(code).catch(() => {});
           clearCache(code);
           return;
@@ -451,22 +461,25 @@ export default function RoomThread() {
       const merged = reset
         ? sorted
         : [...messages, ...sorted.filter((m) => !messages.some((prev) => prev.id === m.id))];
+
+      // Dismiss spinner immediately — nicknames/reactions hydrate after
+      setMessages(merged);
+      setNickname(nick);
+      setMyDeviceId(deviceId);
+      setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
+      if (reset) setLoading(false);
+
+      // Secondary data: nicknames, reactions, geocoding — don't block the UI
       const uniqueIds = [...new Set(merged.map((m) => m.sender_device_id))];
       const messageIds = merged.map((m) => m.id);
       const [names, rxns] = await Promise.all([
         getNicknames(uniqueIds),
         fetchReactions(messageIds),
       ]);
-      setMessages(merged);
-      setNickname(nick);
-      setMyDeviceId(deviceId);
       setSenderNames(names);
       setReactions(rxns);
-      setChatHasMore(filtered.length === ROOM_CHAT_PAGE_SIZE);
       setLastSeen(code).catch(() => {});
-      if (reset) setLoading(false);
 
-      // Background: geocode after primary data is visible
       const withCoords = merged.filter((m) => m.lat && m.lng);
       if (withCoords.length > 0) {
         Promise.all(
@@ -771,54 +784,68 @@ export default function RoomThread() {
           </Text>
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <View style={{ paddingBottom: 40 }}>
-            {messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                isMe={msg.sender_device_id === myDeviceId}
-                displayName={
-                  msg.sender_device_id === myDeviceId
-                    ? "You"
-                    : senderNames[msg.sender_device_id] ?? getAlias(msg.sender_device_id)
-                }
-                onReport={() => handleReport(msg.id)}
-                reactions={reactions[msg.id] ?? {}}
-                deviceId={myDeviceId ?? ""}
-                onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
-                location={locationMap[msg.id] ?? null}
-              />
-            ))}
-            {chatHasMore && (
-              <View style={{ alignItems: "center", marginTop: 4 }}>
-                <TouchableOpacity
-                  onPress={() => loadMessages(false)}
-                  disabled={chatLoadingMore}
-                  style={{
-                    backgroundColor: colors.charcoal,
-                    borderRadius: 20,
-                    paddingHorizontal: 18,
-                    paddingVertical: 10,
-                    minWidth: 124,
-                    alignItems: "center",
-                  }}
-                >
-                  {chatLoadingMore ? (
-                    <ActivityIndicator color={colors.cream} size="small" />
-                  ) : (
-                    <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </ScrollView>
+        <FlatList
+          data={messages}
+          keyExtractor={(item) => item.id}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          renderItem={({ item: msg }) => (
+            <MessageBubble
+              message={msg}
+              isMe={msg.sender_device_id === myDeviceId}
+              displayName={
+                msg.sender_device_id === myDeviceId
+                  ? "You"
+                  : senderNames[msg.sender_device_id] ?? getAlias(msg.sender_device_id)
+              }
+              onReport={() => handleReport(msg.id)}
+              reactions={reactions[msg.id] ?? {}}
+              deviceId={myDeviceId ?? ""}
+              onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
+              location={locationMap[msg.id] ?? null}
+            />
+          )}
+          ListFooterComponent={chatHasMore ? (
+            <View style={{ alignItems: "center", marginTop: 4 }}>
+              <TouchableOpacity
+                onPress={() => loadMessages(false)}
+                disabled={chatLoadingMore}
+                style={{
+                  backgroundColor: colors.charcoal,
+                  borderRadius: 20,
+                  paddingHorizontal: 18,
+                  paddingVertical: 10,
+                  minWidth: 124,
+                  alignItems: "center",
+                }}
+              >
+                {chatLoadingMore ? (
+                  <ActivityIndicator color={colors.cream} size="small" />
+                ) : (
+                  <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 13 }}>Load More</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        />
       )}
 
       {/* Floating camera button — same style as the tab bar camera button */}
       <TouchableOpacity
-        onPress={() => {
+        onPress={async () => {
+          if (!UNLOCK_CAMERA_FOR_TESTING) {
+            const info = await fetchSunsetTime();
+            if (info && !isWithinGoldenHour(info.sunsetTime)) {
+              Alert.alert(
+                "Not quite golden hour",
+                `Today's sunset is at ${info.formattedLocal}. Camera unlocks at ${formatSunsetTime(goldenHourWindowStart(info.sunsetTime))}.`
+              );
+              return;
+            }
+          }
           if (!permission?.granted) { requestPermission(); return; }
           resetCamera();
           setShowCamera(true);

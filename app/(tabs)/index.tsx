@@ -6,6 +6,7 @@ import {
   Dimensions,
   Alert,
   InteractionManager,
+  Image,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -50,6 +51,7 @@ export default function FeedScreen() {
   const hasLoadedRef = useRef(false);
   const [locationMap, setLocationMap] = useState<Record<string, string>>({});
   const [particlesReady, setParticlesReady] = useState(false);
+  const lastGeocodedIdsRef = useRef("");
 
   useEffect(() => {
     getDeviceId().then((id) => setDeviceId(id ?? ""));
@@ -60,15 +62,19 @@ export default function FeedScreen() {
     if (!reset) setLoadingMore(true);
     try {
       setLoadError(null);
-      const rooms = await fetchMyRoomsCached();
+      // Parallelize: rooms + deviceId together (both cached after first call)
+      const [rooms, myDeviceId] = await Promise.all([
+        fetchMyRoomsCached(),
+        getDeviceId(),
+      ]);
       const roomIds = rooms.map((r) => r.id);
       roomIdsRef.current = roomIds;
+      if (myDeviceId) setDeviceId(myDeviceId);
       const from = reset ? 0 : messages.length;
       const range = { from, to: from + FEED_PAGE_SIZE - 1 };
-      const [msgs, reported, myDeviceId] = await Promise.all([
+      const [msgs, reported] = await Promise.all([
         fetchAllMyMessages(roomIds, range),
         getReportedMessageIds(),
-        getDeviceId(),
       ]);
       const filtered = msgs.filter((m) => !reported.has(m.id));
       const merged = reset
@@ -76,18 +82,17 @@ export default function FeedScreen() {
         : [...messages, ...filtered.filter((m) => !messages.some((prev) => prev.id === m.id))];
       setMessages(merged);
       setHasMore(filtered.length === FEED_PAGE_SIZE);
-      if (myDeviceId) setDeviceId(myDeviceId);
 
+      // Prefetch first visible images so they appear instantly when spinner drops
+      merged.slice(0, 4).forEach((m) => {
+        if (m.photo_url) Image.prefetch(m.photo_url);
+      });
+
+      // Fetch nicknames + reactions in parallel — but don't block the spinner on them
       const uniqueSenders = [...new Set(merged.map((m) => m.sender_device_id))];
       const ids = merged.map((m) => m.id);
-      const [names, rxns] = await Promise.all([
-        getNicknames(uniqueSenders),
-        fetchReactions(ids),
-      ]);
-      setSenderNames(names);
-      setReactions(rxns);
 
-      // Primary data ready — dismiss spinner now
+      // Dismiss spinner now — secondary data hydrates after
       if (reset) {
         setLoading(false);
         hasLoadedRef.current = true;
@@ -95,13 +100,22 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
 
+      const [names, rxns] = await Promise.all([
+        getNicknames(uniqueSenders),
+        fetchReactions(ids),
+      ]);
+      setSenderNames(names);
+      setReactions(rxns);
+
       // Background: sunset time and geocoding hydrate after initial render
       fetchSunsetTime().then((sunset) => {
         if (sunset) setSunsetLabel(sunset.formattedLocal);
       }).catch(() => {});
 
       const withCoords = merged.filter((m) => m.lat && m.lng);
-      if (withCoords.length > 0) {
+      const geoKey = withCoords.map((m) => m.id).join(",");
+      if (withCoords.length > 0 && geoKey !== lastGeocodedIdsRef.current) {
+        lastGeocodedIdsRef.current = geoKey;
         Promise.all(
           withCoords.map(async (m) => ({
             id: m.id,
