@@ -104,6 +104,11 @@ async function getLocation(): Promise<{ lat: number; lng: number } | null> {
   try {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") return null;
+    // Try last-known first (instant) — fall back to fresh GPS
+    const lastKnown = await Location.getLastKnownPositionAsync();
+    if (lastKnown) {
+      return { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude };
+    }
     const loc = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
     });
@@ -114,13 +119,13 @@ async function getLocation(): Promise<{ lat: number; lng: number } | null> {
 }
 
 /** Supabase storage image transform — smaller download for feeds (no upload change). */
-export function thumbUrl(url: string, width = 640): string {
+export function thumbUrl(url: string, width = 1080): string {
   if (!url || !url.includes("/storage/v1/object/public/")) return url;
   return (
     url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/") +
     "?width=" +
     width +
-    "&quality=70"
+    "&quality=80"
   );
 }
 
@@ -163,17 +168,18 @@ export async function sendPhoto({
   filter?: string;
   adjustments?: object;
 }) {
-  const [photoUrl, location] = await Promise.all([
+  // Parallelize: upload + location + room lookup all at once
+  const [photoUrl, location, roomResult] = await Promise.all([
     uploadPhoto(uri, deviceId),
     getLocation(),
+    supabase
+      .from("rooms")
+      .select("id, code, members")
+      .in("code", roomCodes),
   ]);
 
-  const { data: rooms, error: roomError } = await supabase
-    .from("rooms")
-    .select("id, code, members")
-    .in("code", roomCodes);
-
-  if (roomError) throw new Error(roomError.message);
+  if (roomResult.error) throw new Error(roomResult.error.message);
+  const rooms = roomResult.data;
   if (!rooms?.length) throw new Error("No matching rooms found.");
 
   const { error } = await supabase.from("messages").insert(
@@ -203,12 +209,14 @@ export async function fetchLatestMessageTimes(
 ): Promise<Record<string, string>> {
   if (!roomIds.length) return {};
   const cutoff = new Date(Date.now() - EXPIRY_MS).toISOString();
+  // Limit to a reasonable number — we only need the most recent per room
   const { data } = await supabase
     .from("messages")
     .select("room_id, created_at")
     .in("room_id", roomIds)
     .gte("created_at", cutoff)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(roomIds.length * 2);
 
   const map: Record<string, string> = {};
   for (const row of data ?? []) {
@@ -224,13 +232,14 @@ export async function fetchMessagesWithLocation(opts: {
   range?: { from: number; to: number };
 }): Promise<Message[]> {
   const range = opts.range ?? { from: 0, to: 49 };
+  const pageSize = range.to - range.from + 1;
   let query = supabase
     .from("messages")
     .select("*")
     .not("lat", "is", null)
     .not("lng", "is", null)
     .order("created_at", { ascending: false })
-    .range(range.from, range.to);
+    .range(range.from, range.to + pageSize);
 
   if (opts.mode === "mine") {
     query = query.eq("sender_device_id", opts.deviceId);
@@ -241,7 +250,17 @@ export async function fetchMessagesWithLocation(opts: {
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return (data ?? []) as Message[];
+
+  // Deduplicate: same photo sent to multiple rooms → one map pin
+  const seen = new Set<string>();
+  const deduped: Message[] = [];
+  for (const msg of (data ?? []) as Message[]) {
+    if (msg.photo_url && seen.has(msg.photo_url)) continue;
+    if (msg.photo_url) seen.add(msg.photo_url);
+    deduped.push(msg);
+    if (deduped.length >= pageSize) break;
+  }
+  return deduped;
 }
 
 export async function fetchRoomMessagesByCode(
@@ -274,16 +293,28 @@ export async function fetchAllMyMessages(
   if (!roomIds.length) return [];
   const cutoff = new Date(Date.now() - EXPIRY_MS).toISOString();
 
+  // Over-fetch to account for duplicates being removed, then trim to requested range size
+  const pageSize = range.to - range.from + 1;
   const { data, error } = await supabase
     .from("messages")
     .select("*")
     .in("room_id", roomIds)
     .gte("created_at", cutoff)
     .order("created_at", { ascending: false })
-    .range(range.from, range.to);
+    .range(range.from, range.to + pageSize);
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as Message[];
+
+  // Deduplicate: same photo sent to multiple rooms → keep first (most recent) only
+  const seen = new Set<string>();
+  const deduped: Message[] = [];
+  for (const msg of (data ?? []) as Message[]) {
+    if (msg.photo_url && seen.has(msg.photo_url)) continue;
+    if (msg.photo_url) seen.add(msg.photo_url);
+    deduped.push(msg);
+    if (deduped.length >= pageSize) break;
+  }
+  return deduped;
 }
 
 // ─── Phase 2.3: ephemeral chat messages with sunset expiry ───────────────────
