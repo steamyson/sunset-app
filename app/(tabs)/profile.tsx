@@ -11,6 +11,7 @@ import {
   Dimensions,
   Image,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useState } from "react";
@@ -113,6 +114,7 @@ export default function ProfileScreen() {
 
   async function handleSaveNickname() {
     if (!nicknameInput.trim() || !deviceId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSavingNickname(true);
     await setLocalNickname(nicknameInput.trim());
     await syncDeviceToSupabase(deviceId, nicknameInput.trim());
@@ -123,6 +125,7 @@ export default function ProfileScreen() {
 
   async function handleAlertToggle(value: boolean) {
     if (Platform.OS === "web") return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTogglingAlert(true);
     try {
       if (value) {
@@ -142,6 +145,7 @@ export default function ProfileScreen() {
   }
 
   async function handleLeaveRoom(room: Room) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await leaveRoom(room.code);
     setRooms((prev) => prev.filter((r) => r.id !== room.id));
     setLeavingRoom(null);
@@ -173,6 +177,7 @@ export default function ProfileScreen() {
   }
 
   async function handleSelectPreset(preset: typeof PRESET_AVATARS[number]) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await saveAvatar(preset);
     setAvatar(preset);
     setShowAvatarPicker(false);

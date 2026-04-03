@@ -3,6 +3,7 @@ import { TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, interaction } from "../../utils/theme";
+import * as Haptics from "expo-haptics";
 
 function TabIcon({ name, focused }: { name: keyof typeof Ionicons.glyphMap; focused: boolean }) {
   return (
@@ -20,10 +21,25 @@ function TabIcon({ name, focused }: { name: keyof typeof Ionicons.glyphMap; focu
   );
 }
 
+function HapticTabButton(props: any) {
+  return (
+    <TouchableOpacity
+      {...props}
+      onPress={(e: any) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        props.onPress?.(e);
+      }}
+    />
+  );
+}
+
 function CameraButton() {
   return (
     <TouchableOpacity
-      onPress={() => router.push("/camera")}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push("/camera");
+      }}
       activeOpacity={interaction.activeOpacitySubtle}
       style={{
         top: -18,
@@ -58,6 +74,7 @@ export default function TabLayout() {
           paddingTop: 10,
           height: tabBarHeight,
         },
+        tabBarButton: (props) => <HapticTabButton {...props} />,
         tabBarActiveTintColor: colors.ember,
         tabBarInactiveTintColor: colors.ash,
         tabBarLabelStyle: { fontFamily: "Caveat_700Bold", fontSize: 13, letterSpacing: 0.3 },

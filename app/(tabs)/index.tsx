@@ -9,6 +9,7 @@ import {
   Image,
   Animated,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -296,7 +297,10 @@ export default function FeedScreen() {
             hasMore ? (
               <View style={{ alignItems: "center", marginTop: 4 }}>
                 <TouchableOpacity
-                  onPress={loadMore}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    loadMore();
+                  }}
                   disabled={loadingMore}
                   style={{
                     backgroundColor: colors.charcoal,
@@ -367,7 +371,10 @@ function PhotoCard({
   return (
     <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
       <TouchableOpacity
-        onLongPress={onReport}
+        onLongPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onReport();
+        }}
         activeOpacity={1}
         delayLongPress={600}
         onPressIn={onPressIn}

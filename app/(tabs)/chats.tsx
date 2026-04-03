@@ -186,6 +186,7 @@ export default function ChatsScreen() {
       onPanResponderRelease: () => {
         zoomLastDist.current = 0;
         const z = zoomValueRef.current;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         // Globe zoom: 0.35–0.55 = slight zoom into globe. z >= 0.78 = return to sky.
         if (z >= 0.78) {
           zoomValueRef.current = 1;
