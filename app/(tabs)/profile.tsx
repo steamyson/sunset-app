@@ -26,6 +26,7 @@ import {
 } from "../../utils/avatar";
 
 import { useFocusEffect, useRouter } from "expo-router";
+import { getStreak } from "../../utils/storage";
 import { getAuthUser, signInWithEmail, verifyOtp, signOut, signInWithGoogle } from "../../utils/auth";
 import { getAlias } from "../../utils/aliases";
 import type { User } from "@supabase/supabase-js";
@@ -94,6 +95,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [togglingAlert, setTogglingAlert] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
+  const [streak, setStreak] = useState(0);
 
   // Edit nickname modal
   const [editingNickname, setEditingNickname] = useState(false);
@@ -135,6 +137,7 @@ export default function ProfileScreen() {
         setRoomNicknames(nickMap);
         const av = await getAvatar();
         setAvatar(av);
+        getStreak().then(setStreak).catch(() => {});
         const user = await getAuthUser();
         setAuthUser(user);
         setLoading(false);
@@ -365,9 +368,21 @@ export default function ProfileScreen() {
               </View>
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal }}>
-                {nickname || alias}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal }}>
+                  {nickname || alias}
+                </Text>
+                {streak >= 2 && (
+                  <View style={{
+                    flexDirection: "row", alignItems: "center", gap: 3,
+                    backgroundColor: `${colors.ember}18`, paddingHorizontal: 8, paddingVertical: 3,
+                    borderRadius: 12,
+                  }}>
+                    <Text style={{ fontSize: 14 }}>🔥</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "800", color: colors.ember }}>{streak}</Text>
+                  </View>
+                )}
+              </View>
               {nickname && (
                 <Text style={{ fontSize: 12, color: colors.ash, marginTop: 2, fontStyle: "italic" }}>
                   alias: {alias}

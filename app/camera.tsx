@@ -27,6 +27,7 @@ import { CropView } from "../components/CropView";
 import { FilterView } from "../components/FilterView";
 import { FilteredImage } from "../components/FilteredImage";
 import { sendPhoto } from "../utils/messages";
+import { recordCapture } from "../utils/storage";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils/filters";
 import { getDeviceId } from "../utils/device";
 import { colors, interaction } from "../utils/theme";
@@ -165,6 +166,7 @@ export default function CameraScreen() {
     try {
       const deviceId = await getDeviceId();
       await sendPhoto({ uri: photo, roomCodes, deviceId, filter: activeFilter, adjustments: activeAdjustments });
+      recordCapture().catch(() => {});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
     } catch (e: any) {
