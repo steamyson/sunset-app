@@ -18,7 +18,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const mapsLib = Platform.OS !== "web" ? require("react-native-maps") : null;
 const MapView   = mapsLib?.default ?? null;
 const Marker    = mapsLib?.Marker ?? null;
-const PROVIDER_GOOGLE = mapsLib?.PROVIDER_GOOGLE ?? null;
+const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+const PROVIDER_GOOGLE = GOOGLE_MAPS_KEY ? (mapsLib?.PROVIDER_GOOGLE ?? null) : null;
 const mapStyle  = Platform.OS === "android"
   ? require("../../utils/mapStyle").default
   : [];
@@ -275,7 +276,7 @@ function NativeMap({ messages, myCoords }: {
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         initialRegion={USA_REGION}
         onMapReady={() => setMapReady(true)}
-        customMapStyle={Platform.OS === "android" ? mapStyle : []}
+        customMapStyle={Platform.OS === "android" && PROVIDER_GOOGLE ? mapStyle : []}
         showsUserLocation
         showsMyLocationButton={false}
         showsCompass={false}
