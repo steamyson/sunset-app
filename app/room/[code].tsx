@@ -29,7 +29,7 @@ import { fetchReactions, type ReactionMap, type MessageReactions } from "../../u
 import { reverseGeocode } from "../../utils/geocoding";
 import { FilteredImage } from "../../components/FilteredImage";
 import { setLastSeen } from "../../utils/lastSeen";
-import { getItem, setItem } from "../../utils/storage";
+import { getItem, setItem, safeJsonParse } from "../../utils/storage";
 import { ReactionBar } from "../../components/ReactionBar";
 import { colors, cloudShape } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
@@ -179,7 +179,7 @@ export default function RoomThread() {
         return;
       }
       const raw = await getItem(UNREAD_PHOTOS_KEY);
-      const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+      const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
       if (!cancelled) setUnreadFlashPending(map[code] === true);
     }
     checkUnreadFlag();
@@ -264,7 +264,7 @@ export default function RoomThread() {
 
   async function markRoomRead(roomCode: string) {
     const raw = await getItem(UNREAD_PHOTOS_KEY);
-    const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+    const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
     map[roomCode] = false;
     await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
   }
@@ -1064,7 +1064,7 @@ function MessageBubble({
         <FilteredImage
           uri={message.photo_url}
           filter={message.filter}
-          adjustments={message.adjustments ? JSON.parse(message.adjustments) : null}
+          adjustments={(() => { try { return message.adjustments ? JSON.parse(message.adjustments) : null; } catch { return null; } })()}
           width={SCREEN_W - 32}
           height={(SCREEN_W - 32) * 1.1}
         />

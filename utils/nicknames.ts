@@ -1,4 +1,4 @@
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, safeJsonParse } from "./storage";
 
 const KEY = "dusk_nicknames";
 
@@ -37,7 +37,7 @@ const DEFAULT_ROOM_NAMES = [
 
 async function load(): Promise<Record<string, string>> {
   const raw = await getItem(KEY);
-  return raw ? JSON.parse(raw) : {};
+  return safeJsonParse(raw, {} as Record<string, string>);
 }
 
 export async function getRoomNickname(code: string): Promise<string | null> {

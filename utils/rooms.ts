@@ -1,6 +1,6 @@
 import { supabase, Room } from "./supabase";
 import { getDeviceId } from "./device";
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, safeJsonParse } from "./storage";
 import { assignDefaultRoomNickname } from "./nicknames";
 import { invalidateRoomCache } from "./roomCache";
 
@@ -18,7 +18,7 @@ function generateCode(): string {
 export async function getLocalRoomCodes(): Promise<string[]> {
   if (cachedLocalCodes) return cachedLocalCodes;
   const raw = await getItem(LOCAL_ROOMS_KEY);
-  const codes: string[] = raw ? JSON.parse(raw) : [];
+  const codes: string[] = safeJsonParse(raw, []);
   cachedLocalCodes = codes;
   return codes;
 }

@@ -1,4 +1,4 @@
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, safeJsonParse } from "./storage";
 
 const KEY = "dusk_avatar";
 
@@ -30,7 +30,8 @@ export const DEFAULT_AVATAR: AvatarPreset =
 
 export async function getAvatar(): Promise<Avatar> {
   const raw = await getItem(KEY);
-  if (raw) return JSON.parse(raw) as Avatar;
+  const parsed = safeJsonParse<Avatar | null>(raw, null);
+  if (parsed) return parsed;
   return DEFAULT_AVATAR;
 }
 

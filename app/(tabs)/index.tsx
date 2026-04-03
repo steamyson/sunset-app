@@ -356,7 +356,7 @@ function PhotoCard({
         <FilteredImage
           uri={message.photo_url}
           filter={message.filter}
-          adjustments={message.adjustments ? JSON.parse(message.adjustments) : null}
+          adjustments={(() => { try { return message.adjustments ? JSON.parse(message.adjustments) : null; } catch { return null; } })()}
           width={CARD_W}
           height={CARD_W * 1.1}
         />

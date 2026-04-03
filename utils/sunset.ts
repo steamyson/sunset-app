@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, safeJsonParse } from "./storage";
 
 export type SunsetInfo = {
   sunsetTime: Date;
@@ -110,8 +110,8 @@ export async function fetchSunsetTime(): Promise<SunsetInfo | null> {
     // Check disk cache for today
     const raw = await getItem(CACHE_KEY);
     if (raw) {
-      const cached: CacheEntry = JSON.parse(raw);
-      if (cached.date === today) {
+      const cached = safeJsonParse<CacheEntry | null>(raw, null);
+      if (cached && cached.date === today) {
         const sunsetTime = new Date(cached.sunsetISO);
         const info = { sunsetTime, formattedLocal: formatSunsetTime(sunsetTime) };
         memSunsetCache = { date: today, info };

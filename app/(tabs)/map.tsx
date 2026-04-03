@@ -153,7 +153,7 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
                   <FilteredImage
                     uri={msg.photo_url}
                     filter={msg.filter}
-                    adjustments={msg.adjustments ? JSON.parse(msg.adjustments) : null}
+                    adjustments={(() => { try { return msg.adjustments ? JSON.parse(msg.adjustments) : null; } catch { return null; } })()}
                     width={PHOTO_W}
                     height={PHOTO_W * 0.9}
                   />

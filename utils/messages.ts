@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import { supabase } from "./supabase";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, safeJsonParse } from "./storage";
 import { getExpiresAt } from "./sunset";
 import { getDeviceId } from "./device";
 import { base64ToArrayBuffer } from "./encoding";
@@ -20,7 +20,7 @@ export function clearReportedCache(): void {
 export async function reportMessage(messageId: string): Promise<void> {
   const deviceId = await getDeviceId();
   const raw = await getItem(REPORTS_STORAGE_KEY);
-  const ids: string[] = raw ? JSON.parse(raw) : [];
+  const ids: string[] = safeJsonParse(raw, []);
   if (!ids.includes(messageId)) ids.push(messageId);
   await setItem(REPORTS_STORAGE_KEY, JSON.stringify(ids));
 
@@ -51,7 +51,7 @@ export async function getReportedMessageIds(): Promise<Set<string>> {
   }
 
   const raw = await getItem(REPORTS_STORAGE_KEY);
-  const ids: string[] = raw ? JSON.parse(raw) : [];
+  const ids: string[] = safeJsonParse(raw, []);
   reportedCache = { ids, ts: Date.now() };
   return new Set(ids);
 }

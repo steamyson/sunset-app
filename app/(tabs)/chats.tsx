@@ -35,7 +35,7 @@ const SKY_HEIGHT = H * 0.6;
 
 import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
-import { getItem, setItem } from "../../utils/storage";
+import { getItem, setItem, safeJsonParse } from "../../utils/storage";
 import { getDeviceId } from "../../utils/device";
 import { leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../utils/roomCache";
@@ -87,7 +87,7 @@ const TAP_BLOOM_BASE = 48;
 async function loadSavedPositions(): Promise<Record<string, { x: number; y: number }> | null> {
   const raw = await getItem(CLOUD_POS_KEY);
   if (!raw) return null;
-  return JSON.parse(raw) as Record<string, { x: number; y: number }>;
+  return safeJsonParse<Record<string, { x: number; y: number }> | null>(raw, null);
 }
 
 async function saveAllCloudPositions(map: Record<string, { x: number; y: number }>): Promise<void> {
@@ -96,7 +96,7 @@ async function saveAllCloudPositions(map: Record<string, { x: number; y: number 
 
 async function saveCloudPosition(code: string, x: number, y: number): Promise<void> {
   const raw = await getItem(CLOUD_POS_KEY);
-  const map: Record<string, { x: number; y: number }> = raw ? JSON.parse(raw) : {};
+  const map: Record<string, { x: number; y: number }> = safeJsonParse(raw, {} as Record<string, { x: number; y: number }>);
   map[code] = { x, y };
   await setItem(CLOUD_POS_KEY, JSON.stringify(map));
 }
@@ -330,7 +330,7 @@ export default function ChatsScreen() {
           if (currentRoomCodeRef.current === room.code) return;
           setUnreadRooms((prev) => new Set([...prev, room.code]));
           const raw = await getItem(UNREAD_PHOTOS_KEY);
-          const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+          const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
           map[room.code] = true;
           await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
           prefetchRoom(room.code);
@@ -682,7 +682,7 @@ export default function ChatsScreen() {
         return next;
       });
       getItem(UNREAD_PHOTOS_KEY).then((raw) => {
-        const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+        const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
         map[roomCode] = false;
         setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
       });
@@ -1112,7 +1112,7 @@ export default function ChatsScreen() {
                       return next;
                     });
                     getItem(UNREAD_PHOTOS_KEY).then((raw) => {
-                      const map: Record<string, boolean> = raw ? JSON.parse(raw) : {};
+                      const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
                       map[room.code] = false;
                       setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
                     });
