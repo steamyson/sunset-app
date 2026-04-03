@@ -2,6 +2,7 @@ import { View, Animated, Easing, Dimensions } from "react-native";
 import Svg, { Circle, Ellipse } from "react-native-svg";
 import { Text } from "./Text";
 import { colors } from "../utils/theme";
+import type { AvatarPreset } from "../utils/avatar";
 import { forwardRef, useEffect, useRef } from "react";
 
 // Sunset color layers — unread pulse on sky canvas (bleed through semi-transparent cloud)
@@ -113,10 +114,11 @@ type CloudProps = {
   lifted?: boolean;
   variant?: number;
   hideLabel?: boolean;
+  avatars?: AvatarPreset[];
 };
 
 export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
-  { name, width, unread, lifted, variant = 0, hideLabel = false },
+  { name, width, unread, lifted, variant = 0, hideLabel = false, avatars },
   ref
 ) {
   const height = width * ASPECT;
@@ -183,6 +185,34 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
             >
               {name}
             </Text>
+          </View>
+        )}
+
+        {avatars && avatars.length > 0 && (
+          <View style={{
+            position: "absolute",
+            top: height * 0.18,
+            right: width * 0.08,
+            flexDirection: "row-reverse",
+          }}>
+            {avatars.slice(0, 3).map((av, i) => (
+              <View
+                key={av.id}
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: av.bg,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderWidth: 1.5,
+                  borderColor: "#FFFDF8",
+                  marginRight: i > 0 ? -6 : 0,
+                }}
+              >
+                <Text style={{ fontSize: 10, lineHeight: 13 }}>{av.emoji}</Text>
+              </View>
+            ))}
           </View>
         )}
 

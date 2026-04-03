@@ -44,6 +44,7 @@ import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
 import { colors, interaction, spacing } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
+import { fetchMemberAvatars, type AvatarPreset } from "../../utils/avatar";
 import type { Room } from "../../utils/supabase";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import { CONTINENTS } from "../../continents";
@@ -110,6 +111,7 @@ export default function ChatsScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [nicknames, setNicknames] = useState<Record<string, string>>({});
   const [unreadRooms, setUnreadRooms] = useState<Set<string>>(new Set());
+  const [memberAvatars, setMemberAvatars] = useState<Record<string, AvatarPreset>>({});
   const [loading, setLoading] = useState(true);
 
   // Add room sheet
@@ -298,6 +300,10 @@ export default function ChatsScreen() {
         }
         setUnreadRooms(unread);
       }).catch(() => {});
+
+      // Background: fetch member avatars for cloud bubbles
+      const allDeviceIds = Array.from(new Set(roomList.flatMap((r) => r.members)));
+      fetchMemberAvatars(allDeviceIds).then(setMemberAvatars).catch(() => {});
     } catch (e) {
       console.error(e);
       setLoading(false);
@@ -1105,6 +1111,10 @@ export default function ChatsScreen() {
                           lifted={liftedRoomId === room.id}
                           variant={roomVariant(room.code)}
                           hideLabel={zoomingRoomId === room.id}
+                          avatars={room.members
+                            .filter((id) => memberAvatars[id])
+                            .map((id) => memberAvatars[id])
+                            .slice(0, 3)}
                         />
                       </View>
                     </Animated.View>
@@ -1125,6 +1135,7 @@ export default function ChatsScreen() {
                   rooms={rooms}
                   nicknames={nicknames}
                   unreadRooms={unreadRooms}
+                  memberAvatars={memberAvatars}
                   onClose={goToSkyWithMode}
                   onEnterRoom={(room) => {
                     currentRoomCodeRef.current = room.code;
@@ -1602,6 +1613,7 @@ function GlobeCloudItem({
   cy,
   nicknames,
   unreadRooms,
+  memberAvatars,
   onPress,
 }: {
   room: Room;
@@ -1615,6 +1627,7 @@ function GlobeCloudItem({
   cy: number;
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
+  memberAvatars: Record<string, AvatarPreset>;
   onPress: () => void;
 }) {
   const animatedStyle = useAnimatedStyle(() => {
@@ -1651,9 +1664,80 @@ function GlobeCloudItem({
           width={72}
           unread={unreadRooms.has(room.code)}
           variant={roomVariant(room.code)}
+          avatars={room.members
+            .filter((id) => memberAvatars[id])
+            .map((id) => memberAvatars[id])
+            .slice(0, 3)}
         />
       </TouchableOpacity>
     </AnimatedReanimated.View>
+  );
+}
+
+// ─── Constellation lines — connect rooms with shared members ─────────────────
+function ConstellationLines({
+  rooms, rotLon, rotLat, cloudOrbitLon, cx, cy,
+}: {
+  rooms: Room[];
+  rotLon: SharedNum; rotLat: SharedNum; cloudOrbitLon: SharedNum;
+  cx: number; cy: number;
+}) {
+  // Pre-compute which room pairs share members
+  const pairs = useMemo(() => {
+    const result: { aLon: number; aLat: number; aOff: number; bLon: number; bLat: number; bOff: number }[] = [];
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i], b = rooms[j];
+        const shared = a.members.some((m) => b.members.includes(m));
+        if (shared) {
+          const posA = roomGlobePos(a.code);
+          const posB = roomGlobePos(b.code);
+          result.push({
+            aLon: posA.lon, aLat: posA.lat, aOff: cloudLonOffset(a.id),
+            bLon: posB.lon, bLat: posB.lat, bOff: cloudLonOffset(b.id),
+          });
+        }
+      }
+    }
+    return result;
+  }, [rooms]);
+
+  const animatedProps = useAnimatedProps(() => {
+    "worklet";
+    let d = "";
+    for (const p of pairs) {
+      const steps = 12;
+      let visible = false;
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const lon = p.aLon + (p.bLon - p.aLon) * t + rotLon.value + (p.aOff + (p.bOff - p.aOff) * t) + cloudOrbitLon.value;
+        const lat = p.aLat + (p.bLat - p.aLat) * t + rotLat.value;
+        const cLat = Math.max(-0.6, Math.min(0.6, lat));
+        const x3 = Math.cos(cLat) * Math.sin(lon);
+        const y3 = Math.sin(cLat);
+        const z3 = Math.cos(cLat) * Math.cos(lon);
+        if (z3 <= 0) continue;
+        const sx = cx + x3 * GLOBE_R;
+        const sy = cy - y3 * GLOBE_R;
+        if (!visible) { d += `M${sx},${sy} `; visible = true; }
+        else { d += `L${sx},${sy} `; }
+      }
+    }
+    return { d: d || "M0,0" };
+  });
+
+  if (pairs.length === 0) return null;
+
+  return (
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      <AnimatedPath
+        animatedProps={animatedProps}
+        stroke={colors.lavender}
+        strokeWidth={1.5}
+        strokeOpacity={0.3}
+        fill="none"
+      />
+    </Svg>
   );
 }
 
@@ -1661,6 +1745,7 @@ function GlobeView({
   rooms,
   nicknames,
   unreadRooms,
+  memberAvatars,
   onClose,
   onEnterRoom,
   zoomLevel,
@@ -1670,6 +1755,7 @@ function GlobeView({
   rooms: Room[];
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
+  memberAvatars: Record<string, AvatarPreset>;
   onClose: () => void;
   onEnterRoom: (room: Room) => void;
   zoomLevel: Animated.Value;
@@ -1850,6 +1936,7 @@ function GlobeView({
             cy={cy}
             nicknames={nicknames}
             unreadRooms={unreadRooms}
+            memberAvatars={memberAvatars}
             onPress={() => {
               onClose();
               onEnterRoom(room);

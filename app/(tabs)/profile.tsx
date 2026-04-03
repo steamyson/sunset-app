@@ -23,6 +23,7 @@ import {
   getAvatar,
   saveAvatar,
   persistPhotoUri,
+  syncAvatarToServer,
 } from "../../utils/avatar";
 
 import { useFocusEffect, useRouter } from "expo-router";
@@ -205,6 +206,7 @@ export default function ProfileScreen() {
       await saveAvatar(newAvatar);
       setAvatar(newAvatar);
       setShowAvatarPicker(false);
+      getDeviceId().then((id) => { if (id) syncAvatarToServer(id, newAvatar); }).catch(() => {});
     } catch {
       Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
     }
@@ -215,6 +217,7 @@ export default function ProfileScreen() {
     await saveAvatar(preset);
     setAvatar(preset);
     setShowAvatarPicker(false);
+    getDeviceId().then((id) => { if (id) syncAvatarToServer(id, preset); }).catch(() => {});
   }
 
   async function handleCreateRoom() {
