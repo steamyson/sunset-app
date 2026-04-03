@@ -8,6 +8,7 @@ import {
   Dimensions,
   Platform,
   Linking,
+  Animated,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -190,6 +191,26 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
 // ─── Native map ──────────────────────────────────────────────────────────────
 // Badge is only shown when zoomed in past this threshold (city scale)
 const BADGE_DELTA_THRESHOLD = 0.5;
+
+function MapSkeleton() {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.6, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [opacity]);
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: colors.mist, opacity }} />
+      <Animated.View style={{ width: 140, height: 14, borderRadius: 7, backgroundColor: colors.mist, opacity, marginTop: 16 }} />
+    </View>
+  );
+}
 
 function NativeMap({ messages, myCoords }: {
   messages: Message[];
@@ -445,9 +466,7 @@ export default function MapScreen() {
     <View style={{ flex: 1 }}>
       {/* Map fills everything */}
       {loading ? (
-        <View style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.ember} size="large" />
-        </View>
+        <MapSkeleton />
       ) : (
         <NativeMap messages={messages} myCoords={myCoords} />
       )}

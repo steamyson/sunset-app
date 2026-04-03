@@ -257,9 +257,7 @@ export default function FeedScreen() {
                   )}
                 </View>
               </View>
-              {loading && (
-                <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
-              )}
+              {loading && <FeedSkeleton />}
               {!loading && loadError && (
                 <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
                   <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
@@ -323,6 +321,47 @@ export default function FeedScreen() {
         />
       </SafeAreaView>
     </ParticleTrail>
+  );
+}
+
+function SkeletonCard() {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.6, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [opacity]);
+  const cardW = SCREEN_W - 32;
+  return (
+    <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
+      <Animated.View style={{
+        width: cardW, height: cardW * 1.1, borderRadius: 20,
+        backgroundColor: colors.mist, opacity,
+      }} />
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+        {[40, 40, 40].map((w, i) => (
+          <Animated.View key={i} style={{
+            width: w, height: 28, borderRadius: 14,
+            backgroundColor: colors.mist, opacity,
+          }} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <View style={{ paddingTop: 20 }}>
+      <SkeletonCard />
+      <SkeletonCard />
+      <SkeletonCard />
+    </View>
   );
 }
 

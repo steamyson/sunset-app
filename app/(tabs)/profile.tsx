@@ -10,11 +10,12 @@ import {
   Alert,
   Dimensions,
   Image,
+  Animated,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type Avatar,
   PRESET_AVATARS,
@@ -48,6 +49,36 @@ import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import type { Room } from "../../utils/supabase";
 
 const { width: W, height: H } = Dimensions.get("window");
+
+function ProfileSkeleton() {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.6, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [opacity]);
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky }}>
+      <View style={{ paddingHorizontal: 24, paddingTop: 32, alignItems: "center" }}>
+        <Animated.View style={{ width: 120, height: 20, borderRadius: 10, backgroundColor: colors.mist, opacity, marginBottom: 24 }} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 16, alignSelf: "stretch", padding: 24 }}>
+          <Animated.View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.mist, opacity }} />
+          <View style={{ flex: 1, gap: 8 }}>
+            <Animated.View style={{ width: 100, height: 16, borderRadius: 8, backgroundColor: colors.mist, opacity }} />
+            <Animated.View style={{ width: 140, height: 12, borderRadius: 6, backgroundColor: colors.mist, opacity }} />
+          </View>
+        </View>
+        <Animated.View style={{ width: W - 48, height: 60, borderRadius: 18, backgroundColor: colors.mist, opacity, marginTop: 16 }} />
+        <Animated.View style={{ width: W - 48, height: 60, borderRadius: 18, backgroundColor: colors.mist, opacity, marginTop: 12 }} />
+      </View>
+    </SafeAreaView>
+  );
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -272,11 +303,7 @@ export default function ProfileScreen() {
   }
 
   if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.ember} />
-      </SafeAreaView>
-    );
+    return <ProfileSkeleton />;
   }
 
   return (
