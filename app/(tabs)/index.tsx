@@ -33,7 +33,7 @@ import { reverseGeocode } from "../../utils/geocoding";
 import { ReactionBar } from "../../components/ReactionBar";
 import { FilteredImage } from "../../components/FilteredImage";
 import { colors, cloudShape, interaction, spacing } from "../../utils/theme";
-import { ParticleTrail } from "../../components/ParticleTrail";
+import { ParticleTrail, type ParticleTrailHandle } from "../../components/ParticleTrail";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 
 const SCREEN_W = W;
@@ -56,6 +56,7 @@ export default function FeedScreen() {
   const [locationMap, setLocationMap] = useState<Record<string, string>>({});
   const [particlesReady, setParticlesReady] = useState(false);
   const lastGeocodedIdsRef = useRef("");
+  const particleRef = useRef<ParticleTrailHandle>(null);
 
   useEffect(() => {
     getDeviceId().then((id) => setDeviceId(id ?? ""));
@@ -190,7 +191,7 @@ export default function FeedScreen() {
   }
 
   return (
-    <ParticleTrail style={{ backgroundColor: colors.sky }} disabled={!particlesReady}>
+    <ParticleTrail ref={particleRef} style={{ backgroundColor: colors.sky }} disabled={!particlesReady}>
 
       <SunGlow
         width={W}
@@ -231,6 +232,7 @@ export default function FeedScreen() {
               onReport={() => handleReport(msg.id)}
               onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
               location={locationMap[msg.id] ?? null}
+              onSpawnParticle={(x, y, c) => particleRef.current?.spawnAt(x, y, c)}
             />
           )}
           contentContainerStyle={{ paddingBottom: 32 }}
@@ -469,6 +471,7 @@ function PhotoCard({
   onReport,
   onReactionUpdate,
   location,
+  onSpawnParticle,
 }: {
   message: Message;
   senderName: string | undefined;
@@ -477,6 +480,7 @@ function PhotoCard({
   onReport: () => void;
   onReactionUpdate: (emoji: string, added: boolean) => void;
   location: string | null;
+  onSpawnParticle?: (pageX: number, pageY: number, color: string) => void;
 }) {
   const expiresIn = Math.max(
     0,
@@ -572,6 +576,7 @@ function PhotoCard({
         deviceId={deviceId}
         reactions={reactions}
         onUpdate={onReactionUpdate}
+        onSpawnParticle={onSpawnParticle}
       />
     </View>
   );

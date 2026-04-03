@@ -10,7 +10,7 @@ type Particle = {
   opacity: Animated.Value; scale: Animated.Value;
 };
 
-type CanvasHandle = { spawn: (x: number, y: number) => void };
+type CanvasHandle = { spawn: (x: number, y: number, tint?: string) => void };
 
 const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
   const [particles, setParticles] = useState<Particle[]>([]);
@@ -18,11 +18,12 @@ const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
   const lastRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
-    spawn(x, y) {
+    spawn(x, y, tint?) {
       const now = Date.now();
       if (now - lastRef.current < 8) return;
       lastRef.current = now;
 
+      const palette = tint ? [tint, tint, tint] : SPARK_COLORS;
       const burst = 3 + Math.floor(Math.random() * 3);
       const next: Particle[] = [];
 
@@ -30,7 +31,7 @@ const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
         const id      = idRef.current++;
         const opacity = new Animated.Value(1);
         const scale   = new Animated.Value(1);
-        const color   = SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)];
+        const color   = palette[Math.floor(Math.random() * palette.length)];
         const size    = 4 + Math.pow(Math.random(), 1.8) * 26;
         const scatter = size * 0.4;
         const px      = x + (Math.random() - 0.5) * scatter;
@@ -79,15 +80,17 @@ const ParticleCanvas = forwardRef<CanvasHandle>((_, ref) => {
 // Wraps a screen's root View. Spawns spark particles wherever the user touches.
 // Uses onPanResponderTerminationRequest: true so it always yields to inner
 // responders (ScrollView, MapView, cloud drag, etc.) without interfering.
-export function ParticleTrail({
-  children,
-  style,
-  disabled = false,
-}: {
+export type ParticleTrailHandle = { spawnAt: (pageX: number, pageY: number, tint?: string) => void };
+
+export const ParticleTrail = forwardRef<ParticleTrailHandle, {
   children: React.ReactNode;
   style?: ViewStyle;
   disabled?: boolean;
-}) {
+}>(function ParticleTrail({
+  children,
+  style,
+  disabled = false,
+}, outerRef) {
   const canvasRef      = useRef<CanvasHandle>(null);
   const containerRef   = useRef<View>(null);
   const offset         = useRef({ x: 0, y: 0 });
@@ -98,9 +101,11 @@ export function ParticleTrail({
     containerRef.current?.measureInWindow((x, y) => { offset.current = { x, y }; });
   }
 
-  function spawnAt(pageX: number, pageY: number) {
-    canvasRef.current?.spawn(pageX - offset.current.x, pageY - offset.current.y);
+  function spawnAt(pageX: number, pageY: number, tint?: string) {
+    canvasRef.current?.spawn(pageX - offset.current.x, pageY - offset.current.y, tint);
   }
+
+  useImperativeHandle(outerRef, () => ({ spawnAt }));
 
   const pan = useRef(
     PanResponder.create({
@@ -122,4 +127,4 @@ export function ParticleTrail({
       <ParticleCanvas ref={canvasRef} />
     </View>
   );
-}
+});
