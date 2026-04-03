@@ -75,8 +75,14 @@ None yet.
 - Gesture responder state machine in chats.tsx is fragile — zero test coverage. Globe and collision changes both touch this file. Proceed carefully, one phase at a time.
 - useNativeDriver: false is required on sky canvas; do not change this when modifying animations.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260403-54n | Fix critical bugs: JSON.parse safety, realtime null checks, map marker null check, unread cleanup on room leave, realtime error handler | 2026-04-03 | d65a69d | [260403-54n-fix-critical-bugs](./quick/260403-54n-fix-critical-bugs-json-parse-safety-real/) |
+
 ## Session Continuity
 
-Last session: 2026-03-23
+Last activity: 2026-04-03 - Completed quick task 260403-54n: Fix critical bugs
 Stopped at: Phase 02 complete. Both plans verified on device.
 Resume file: None
