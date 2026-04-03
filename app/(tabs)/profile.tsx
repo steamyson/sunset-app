@@ -23,7 +23,7 @@ import {
   persistPhotoUri,
 } from "../../utils/avatar";
 
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { getAuthUser, signInWithEmail, verifyOtp, signOut, signInWithGoogle } from "../../utils/auth";
 import { getAlias } from "../../utils/aliases";
 import type { User } from "@supabase/supabase-js";
@@ -49,6 +49,7 @@ import type { Room } from "../../utils/supabase";
 const { width: W, height: H } = Dimensions.get("window");
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { glowAnim, pulseScale } = useSunGlowAnimation();
 
   const [alias, setAlias] = useState<string | null>(null);
@@ -395,10 +396,14 @@ export default function ProfileScreen() {
             const rNick = roomNicknames[room.code];
             return (
               <CloudCard key={room.id} seed={i + 1}>
-              <View style={{
-                padding: 18,
-                flexDirection: "row", alignItems: "center",
-              }}>
+              <TouchableOpacity
+                onPress={() => router.push(`/room/${room.code}`)}
+                activeOpacity={interaction.activeOpacity}
+                style={{
+                  padding: 18,
+                  flexDirection: "row", alignItems: "center",
+                }}
+              >
                 <View style={{ flex: 1 }}>
                   {rNick ? (
                     <>
@@ -421,7 +426,7 @@ export default function ProfileScreen() {
                 >
                   <Text style={{ fontSize: 13, fontWeight: "600", color: colors.ash }}>Leave</Text>
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
               </CloudCard>
             );
           })}

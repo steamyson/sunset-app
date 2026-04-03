@@ -7,6 +7,7 @@ import {
   Alert,
   InteractionManager,
   Image,
+  Animated,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -345,14 +346,35 @@ function PhotoCard({
   const almostExpired = expiresIn < 3;
   const CARD_W = SCREEN_W - 32;
 
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const onPressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 8,
+    }).start();
+  };
+  const onPressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 8,
+    }).start();
+  };
+
   return (
     <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
       <TouchableOpacity
         onLongPress={onReport}
         activeOpacity={1}
         delayLongPress={600}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
         style={{ borderRadius: 20, overflow: "hidden", borderWidth: 1.5, borderColor: colors.mist }}
       >
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
         <FilteredImage
           uri={message.photo_url}
           filter={message.filter}
@@ -399,6 +421,7 @@ function PhotoCard({
             </Text>
           </View>
         </View>
+        </Animated.View>
       </TouchableOpacity>
 
       {/* Reaction bar — outside the image so taps don't trigger long-press */}
