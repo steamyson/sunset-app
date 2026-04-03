@@ -24,7 +24,8 @@ import {
   type Message,
 } from "../../utils/messages";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
-import { fetchSunsetTime } from "../../utils/sunset";
+import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, type SunsetInfo } from "../../utils/sunset";
+import Svg, { Circle } from "react-native-svg";
 import { getNicknames } from "../../utils/identity";
 import { getDeviceId } from "../../utils/device";
 import { fetchReactions, type ReactionMap, type MessageReactions } from "../../utils/reactions";
@@ -43,6 +44,7 @@ export default function FeedScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
+  const [sunsetInfo, setSunsetInfo] = useState<SunsetInfo | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [deviceId, setDeviceId] = useState<string>("");
@@ -111,7 +113,10 @@ export default function FeedScreen() {
 
       // Background: sunset time and geocoding hydrate after initial render
       fetchSunsetTime().then((sunset) => {
-        if (sunset) setSunsetLabel(sunset.formattedLocal);
+        if (sunset) {
+          setSunsetLabel(sunset.formattedLocal);
+          setSunsetInfo(sunset);
+        }
       }).catch(() => {});
 
       const withCoords = merged.filter((m) => m.lat && m.lng);
@@ -242,7 +247,9 @@ export default function FeedScreen() {
                   </Text>
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  {sunsetLabel && (
+                  {sunsetInfo ? (
+                    <GoldenHourRing sunset={sunsetInfo} />
+                  ) : sunsetLabel ? (
                     <View style={{
                       backgroundColor: colors.mist,
                       paddingHorizontal: 14, paddingVertical: 8,
@@ -254,7 +261,7 @@ export default function FeedScreen() {
                         {sunsetLabel}
                       </Text>
                     </View>
-                  )}
+                  ) : null}
                 </View>
               </View>
               {loading && <FeedSkeleton />}
@@ -321,6 +328,95 @@ export default function FeedScreen() {
         />
       </SafeAreaView>
     </ParticleTrail>
+  );
+}
+
+// ─── Golden Hour Countdown Ring ──────────────────────────────────────────────
+const RING_SIZE = 56;
+const RING_STROKE = 4;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+const WINDOW_BEFORE_MS = 90 * 60_000;
+const WINDOW_AFTER_MS = 45 * 60_000;
+const TOTAL_WINDOW_MS = WINDOW_BEFORE_MS + WINDOW_AFTER_MS;
+
+function GoldenHourRing({ sunset }: { sunset: SunsetInfo }) {
+  const [progress, setProgress] = useState(0);
+  const [isGolden, setIsGolden] = useState(false);
+  const [label, setLabel] = useState("");
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    function tick() {
+      const now = Date.now();
+      const sunsetMs = sunset.sunsetTime.getTime();
+      const windowStart = sunsetMs - WINDOW_BEFORE_MS;
+      const windowEnd = sunsetMs + WINDOW_AFTER_MS;
+      const golden = now >= windowStart && now <= windowEnd;
+      setIsGolden(golden);
+
+      if (golden) {
+        const elapsed = now - windowStart;
+        setProgress(Math.min(1, elapsed / TOTAL_WINDOW_MS));
+        const remaining = windowEnd - now;
+        const mins = Math.ceil(remaining / 60_000);
+        setLabel(mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
+      } else if (now < windowStart) {
+        setProgress(0);
+        const until = windowStart - now;
+        const mins = Math.ceil(until / 60_000);
+        setLabel(mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
+      } else {
+        setProgress(1);
+        setLabel("done");
+      }
+    }
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, [sunset]);
+
+  useEffect(() => {
+    if (!isGolden) {
+      pulseAnim.setValue(1);
+      return;
+    }
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.08, duration: 1200, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [isGolden, pulseAnim]);
+
+  const offset = RING_CIRCUMFERENCE * (1 - progress);
+
+  return (
+    <Animated.View style={{ alignItems: "center", transform: [{ scale: pulseAnim }] }}>
+      <View style={{ width: RING_SIZE, height: RING_SIZE, alignItems: "center", justifyContent: "center" }}>
+        <Svg width={RING_SIZE} height={RING_SIZE} style={{ position: "absolute" }}>
+          <Circle
+            cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_RADIUS}
+            stroke={colors.mist} strokeWidth={RING_STROKE} fill="none"
+          />
+          <Circle
+            cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_RADIUS}
+            stroke={isGolden ? colors.ember : colors.amber}
+            strokeWidth={RING_STROKE} fill="none"
+            strokeDasharray={`${RING_CIRCUMFERENCE}`}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            rotation="-90" origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
+          />
+        </Svg>
+        <Text style={{ fontSize: 18 }}>{isGolden ? "🌅" : "🌇"}</Text>
+      </View>
+      <Text style={{ fontSize: 10, fontWeight: "700", color: isGolden ? colors.ember : colors.ash, marginTop: 2 }}>
+        {label}
+      </Text>
+    </Animated.View>
   );
 }
 
