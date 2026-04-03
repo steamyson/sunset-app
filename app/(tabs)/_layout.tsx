@@ -2,7 +2,7 @@ import { Tabs, router } from "expo-router";
 import { TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors } from "../../utils/theme";
+import { colors, interaction } from "../../utils/theme";
 
 function TabIcon({ name, focused }: { name: keyof typeof Ionicons.glyphMap; focused: boolean }) {
   return (
@@ -24,7 +24,7 @@ function CameraButton() {
   return (
     <TouchableOpacity
       onPress={() => router.push("/camera")}
-      activeOpacity={0.85}
+      activeOpacity={interaction.activeOpacitySubtle}
       style={{
         top: -18,
         width: 64, height: 64, borderRadius: 32,

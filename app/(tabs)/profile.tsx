@@ -40,7 +40,7 @@ import {
   scheduleSunsetAlert,
   cancelSunsetAlert,
 } from "../../utils/notifications";
-import { colors } from "../../utils/theme";
+import { colors, interaction, spacing } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 
@@ -298,7 +298,7 @@ export default function ProfileScreen() {
       />
 
       <SafeAreaView style={{ flex: 1 }}>
-      <ScrollView style={{ flex: 1, paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1, paddingHorizontal: spacing.lg }} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
         <View style={{ paddingTop: 32, paddingBottom: 20, alignItems: "center" }}>
@@ -310,7 +310,7 @@ export default function ProfileScreen() {
         <CloudCard seed={0} style={{ marginTop: 0 }}>
         <View style={{ padding: 24 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-            <TouchableOpacity onPress={() => setShowAvatarPicker(true)} activeOpacity={0.8}>
+            <TouchableOpacity onPress={() => setShowAvatarPicker(true)} activeOpacity={interaction.activeOpacity}>
               <View style={{
                 width: 64, height: 64, borderRadius: 32, overflow: "hidden",
                 backgroundColor: avatar.type === "preset" ? avatar.bg : colors.mist,
@@ -649,7 +649,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     key={p.id}
                     onPress={() => handleSelectPreset(p)}
-                    activeOpacity={0.8}
+                    activeOpacity={interaction.activeOpacity}
                     style={{
                       width: 60, height: 60, borderRadius: 30,
                       backgroundColor: p.bg,
@@ -667,7 +667,7 @@ export default function ProfileScreen() {
             {/* Upload photo */}
             <TouchableOpacity
               onPress={handlePickPhoto}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 backgroundColor: colors.charcoal, borderRadius: 16,
                 paddingVertical: 16, alignItems: "center", flexDirection: "row",

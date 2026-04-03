@@ -42,7 +42,7 @@ import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../uti
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
-import { colors } from "../../utils/theme";
+import { colors, interaction, spacing } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
 import type { Room } from "../../utils/supabase";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
@@ -1220,7 +1220,7 @@ export default function ChatsScreen() {
           position: "absolute",
           top: 0, left: 0, right: 0,
           paddingTop: insets.top + 8,
-          paddingHorizontal: 20,
+          paddingHorizontal: spacing.lg,
           paddingBottom: 8,
           flexDirection: "row",
           alignItems: "center",
@@ -1231,7 +1231,7 @@ export default function ChatsScreen() {
             {rooms.length > 0 && (
               <TouchableOpacity
                 onPress={() => (viewMode === "sky" ? goToGlobeWithMode() : goToSkyWithMode())}
-                activeOpacity={0.85}
+                activeOpacity={interaction.activeOpacitySubtle}
                 style={{
                   width: 42, height: 42, borderRadius: 21,
                   backgroundColor: viewMode === "globe" ? colors.ember : colors.mist,
@@ -1246,7 +1246,7 @@ export default function ChatsScreen() {
             <Text
               numberOfLines={1}
               ellipsizeMode="clip"
-              style={{ fontSize: 28, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, maxWidth: 180, textAlign: "center" }}
+              style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, maxWidth: 180, textAlign: "center" }}
             >
               Your Sky
             </Text>
@@ -1254,7 +1254,7 @@ export default function ChatsScreen() {
           <View style={{ flex: 1, alignItems: "flex-end" }}>
             <TouchableOpacity
               onPress={() => setShowAddRoom(true)}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 backgroundColor: colors.ember,
                 width: 42, height: 42, borderRadius: 21,
@@ -1365,7 +1365,7 @@ export default function ChatsScreen() {
                 <TouchableOpacity
                   onPress={handleJoinRoom}
                   disabled={addLoading !== null}
-                  activeOpacity={0.85}
+                  activeOpacity={interaction.activeOpacitySubtle}
                   style={{ backgroundColor: colors.charcoal, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 10 }}
                 >
                   {addLoading === "join"
@@ -1376,7 +1376,7 @@ export default function ChatsScreen() {
                 <TouchableOpacity
                   onPress={handleCreateRoom}
                   disabled={addLoading !== null}
-                  activeOpacity={0.85}
+                  activeOpacity={interaction.activeOpacitySubtle}
                   style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 18, alignItems: "center" }}
                 >
                   {addLoading === "create"
@@ -1641,7 +1641,7 @@ function GlobeCloudItem({
   return (
     <AnimatedReanimated.View style={animatedStyle}>
       <TouchableOpacity
-        activeOpacity={0.9}
+        activeOpacity={interaction.activeOpacitySubtle}
         onPress={onPress}
         style={{ flex: 1, minWidth: 1, minHeight: 1 }}
       >

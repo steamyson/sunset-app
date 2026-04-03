@@ -19,7 +19,7 @@ import * as Haptics from "expo-haptics";
 import { createRoom, joinRoom } from "../utils/rooms";
 import { getLocalNickname, syncDeviceToSupabase } from "../utils/identity";
 import { getDeviceId } from "../utils/device";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 import { CloudCard } from "../components/CloudCard";
 import { SunGlow, useSunGlowAnimation } from "../components/SunGlow";
 
@@ -177,7 +177,7 @@ export default function EntryScreen() {
           <TouchableOpacity
             onPress={handleJoin}
             disabled={loading !== null}
-            activeOpacity={0.85}
+            activeOpacity={interaction.activeOpacitySubtle}
             style={{ paddingVertical: 22, paddingHorizontal: 24, alignItems: "center", opacity: loading !== null ? 0.7 : 1 }}
           >
             {loading === "join" ? (
@@ -201,7 +201,7 @@ export default function EntryScreen() {
           <TouchableOpacity
             onPress={handleCreate}
             disabled={loading !== null}
-            activeOpacity={0.85}
+            activeOpacity={interaction.activeOpacitySubtle}
             style={{ paddingVertical: 22, paddingHorizontal: 24, alignItems: "center", opacity: loading !== null ? 0.7 : 1 }}
           >
             {loading === "create" ? (
@@ -299,7 +299,7 @@ export default function EntryScreen() {
             {/* Share button */}
             <TouchableOpacity
               onPress={handleShare}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 backgroundColor: colors.ember,
                 borderRadius: 16,

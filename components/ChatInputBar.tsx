@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "./Text";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 import { PRESET_REACTIONS } from "../utils/messages";
 
 type Props = {
@@ -62,7 +62,7 @@ export function ChatInputBar({ onSendMessage, onSendPreset, disabled }: Props) {
               key={preset.key}
               disabled={disabled}
               onPress={() => !disabled && onSendPreset(preset.key)}
-              activeOpacity={0.8}
+              activeOpacity={interaction.activeOpacity}
               style={{
                 paddingHorizontal: 14,
                 paddingVertical: 8,
@@ -114,7 +114,7 @@ export function ChatInputBar({ onSendMessage, onSendPreset, disabled }: Props) {
           <TouchableOpacity
             disabled={disabled || !value.trim()}
             onPress={handleSend}
-            activeOpacity={0.85}
+            activeOpacity={interaction.activeOpacitySubtle}
             style={{
               marginLeft: 10,
               paddingHorizontal: 14,

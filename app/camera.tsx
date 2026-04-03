@@ -29,7 +29,7 @@ import { FilteredImage } from "../components/FilteredImage";
 import { sendPhoto } from "../utils/messages";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils/filters";
 import { getDeviceId } from "../utils/device";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../utils/sunset";
 
 const SLIDER_H = 200;
@@ -328,7 +328,7 @@ export default function CameraScreen() {
           }}>
             <TouchableOpacity
               onPress={resetAll}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 flex: 1, backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 18,
                 borderRadius: 18, alignItems: "center",
@@ -340,7 +340,7 @@ export default function CameraScreen() {
 
             <TouchableOpacity
               onPress={() => setShowSelector(true)}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
             >
               <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
@@ -481,7 +481,7 @@ export default function CameraScreen() {
       <View style={{ position: "absolute", bottom: 56, alignSelf: "center", alignItems: "center", justifyContent: "center" }}>
         <TouchableOpacity
           onPress={takePicture}
-          activeOpacity={0.9}
+          activeOpacity={interaction.activeOpacitySubtle}
           style={{
             width: 80, height: 80, borderRadius: 40,
             backgroundColor: "white", borderWidth: 5, borderColor: colors.ember,

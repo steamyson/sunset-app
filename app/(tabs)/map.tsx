@@ -31,7 +31,7 @@ import { fetchMessagesWithLocation, thumbUrl, type Message } from "../../utils/m
 import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
-import { colors } from "../../utils/theme";
+import { colors, interaction, spacing } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
 import { FilteredImage } from "../../components/FilteredImage";
 
@@ -48,7 +48,7 @@ function WebFallback({ messages, mode, onToggle }: {
 }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky }}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 16, alignItems: "center" }}>
+      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 32, paddingBottom: 16, alignItems: "center" }}>
         <Text style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -1 }}>Map</Text>
         <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4 }}>where the sky meets the earth</Text>
       </View>
@@ -79,7 +79,7 @@ function ModeToggle({ mode, onToggle }: { mode: MapMode; onToggle: (m: MapMode) 
         <TouchableOpacity
           key={m}
           onPress={() => onToggle(m)}
-          activeOpacity={0.8}
+          activeOpacity={interaction.activeOpacity}
           style={{
             flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center",
             backgroundColor: mode === m ? colors.charcoal : "transparent",

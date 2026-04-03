@@ -102,6 +102,11 @@ export const radius = {
   full: 9999,
 };
 
+export const interaction = {
+  activeOpacity: 0.8,
+  activeOpacitySubtle: 0.85,
+};
+
 export const shadows = {
   soft: {
     shadowColor: colors.charcoal,

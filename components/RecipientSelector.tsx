@@ -8,7 +8,7 @@ import { Text } from "./Text";
 import { useEffect, useState } from "react";
 import { getLocalRoomCodes } from "../utils/rooms";
 import { getAllNicknames } from "../utils/nicknames";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 
 type Props = {
   onSend: (roomCodes: string[]) => void;
@@ -80,7 +80,7 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
                 <TouchableOpacity
                   key={code}
                   onPress={() => toggle(code)}
-                  activeOpacity={0.8}
+                  activeOpacity={interaction.activeOpacity}
                   style={{
                     flexDirection: "row",
                     alignItems: "center",
@@ -147,7 +147,7 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
         <TouchableOpacity
           onPress={() => onSend(Array.from(selected))}
           disabled={selected.size === 0 || sending}
-          activeOpacity={0.85}
+          activeOpacity={interaction.activeOpacitySubtle}
           style={{
             flex: 2,
             padding: 16,

@@ -29,7 +29,7 @@ import { fetchReactions, type ReactionMap, type MessageReactions } from "../../u
 import { reverseGeocode } from "../../utils/geocoding";
 import { ReactionBar } from "../../components/ReactionBar";
 import { FilteredImage } from "../../components/FilteredImage";
-import { colors, cloudShape } from "../../utils/theme";
+import { colors, cloudShape, interaction, spacing } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 
@@ -228,7 +228,7 @@ export default function FeedScreen() {
           )}
           contentContainerStyle={{ paddingBottom: 32 }}
           ListHeaderComponent={
-            <View style={{ paddingHorizontal: 20, paddingTop: 32, paddingBottom: 16 }}>
+            <View style={{ paddingHorizontal: spacing.lg, paddingTop: 32, paddingBottom: 16 }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <View style={{ flex: 1 }} />
                 <View style={{ alignItems: "center" }}>

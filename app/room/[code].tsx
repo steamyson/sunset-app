@@ -31,7 +31,7 @@ import { FilteredImage } from "../../components/FilteredImage";
 import { setLastSeen } from "../../utils/lastSeen";
 import { getItem, setItem, safeJsonParse } from "../../utils/storage";
 import { ReactionBar } from "../../components/ReactionBar";
-import { colors, cloudShape } from "../../utils/theme";
+import { colors, cloudShape, interaction } from "../../utils/theme";
 import { ParticleTrail } from "../../components/ParticleTrail";
 import { DecorativeCloud } from "../../components/SkyCloud";
 import { CameraView, useCameraPermissions, type FlashMode } from "expo-camera";
@@ -742,7 +742,7 @@ export default function RoomThread() {
         {/* Share / copy code button */}
         <TouchableOpacity
           onPress={handleShare}
-          activeOpacity={0.8}
+          activeOpacity={interaction.activeOpacity}
           style={{
             backgroundColor: copied ? colors.plum : colors.charcoal,
             paddingHorizontal: 16, paddingVertical: 8,
@@ -853,7 +853,7 @@ export default function RoomThread() {
           resetCamera();
           setShowCamera(true);
         }}
-        activeOpacity={0.85}
+        activeOpacity={interaction.activeOpacitySubtle}
         style={{
           position: "absolute",
           bottom: 28,
@@ -909,7 +909,7 @@ export default function RoomThread() {
           }}>
             <TouchableOpacity
               onPress={resetCamera}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 flex: 1, backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 18,
                 borderRadius: 18, alignItems: "center",
@@ -922,7 +922,7 @@ export default function RoomThread() {
             <TouchableOpacity
               onPress={handleSend}
               disabled={sending}
-              activeOpacity={0.85}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
             >
               {sending ? <ActivityIndicator color="white" /> : (
@@ -966,7 +966,7 @@ export default function RoomThread() {
           <View style={{ position: "absolute", bottom: 56, alignSelf: "center" }}>
             <TouchableOpacity
               onPress={takePicture}
-              activeOpacity={0.9}
+              activeOpacity={interaction.activeOpacitySubtle}
               style={{
                 width: 80, height: 80, borderRadius: 40,
                 backgroundColor: "white", borderWidth: 5, borderColor: colors.ember,

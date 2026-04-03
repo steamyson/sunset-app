@@ -10,7 +10,7 @@ import { Text } from "../components/Text";
 import { useState } from "react";
 import { router } from "expo-router";
 import { setLocalNickname } from "../utils/identity";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 
 export default function SetupScreen() {
   const [name, setName] = useState("");
@@ -74,7 +74,7 @@ export default function SetupScreen() {
         <TouchableOpacity
           onPress={handleContinue}
           disabled={!name.trim() || saving}
-          activeOpacity={0.85}
+          activeOpacity={interaction.activeOpacitySubtle}
           style={{
             width: "100%",
             backgroundColor: name.trim() ? colors.ember : colors.mist,

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { View, TouchableOpacity } from "react-native";
 import { Text } from "./Text";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 import { toggleReaction, type MessageReactions } from "../utils/reactions";
 import * as Haptics from "expo-haptics";
 
@@ -43,11 +43,12 @@ export function ReactionBar({ messageId, deviceId, reactions, onUpdate }: Props)
           <TouchableOpacity
             key={emoji}
             onPress={() => handlePress(emoji)}
-            activeOpacity={0.75}
+            activeOpacity={interaction.activeOpacity}
             style={{
               flexDirection: "row", alignItems: "center", gap: 5,
               backgroundColor: isMine ? `${colors.ember}18` : `${colors.mist}99`,
-              borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+              borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10,
+              minHeight: 44,
               borderWidth: 1.5,
               borderColor: isMine ? colors.ember : colors.mist,
               opacity: pending === emoji ? 0.6 : 1,

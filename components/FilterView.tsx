@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { Text } from "./Text";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../utils/theme";
+import { colors, interaction } from "../utils/theme";
 import {
   FILTER_NAMES, FILTER_LABELS,
   DEFAULT_ADJUSTMENTS,
@@ -88,7 +88,7 @@ export function FilterView({ uri, onDone, onBack }: Props) {
               <TouchableOpacity
                 key={name}
                 onPress={() => setSelected(name)}
-                activeOpacity={0.8}
+                activeOpacity={interaction.activeOpacity}
                 style={{ alignItems: "center", gap: 5 }}
               >
                 <View style={{
