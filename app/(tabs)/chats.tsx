@@ -324,6 +324,7 @@ export default function ChatsScreen() {
         { event: "INSERT", schema: "public", table: "messages", filter: roomFilter },
         async (payload: { new: { room_id: string; sender_device_id: string } }) => {
           const { room_id, sender_device_id } = payload.new;
+          if (!room_id || !sender_device_id) return;
           if (sender_device_id === myDeviceIdRef.current) return;
           const room = roomsRef.current.find((r) => r.id === room_id);
           if (!room) return;
@@ -336,7 +337,9 @@ export default function ChatsScreen() {
           prefetchRoom(room.code);
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) console.error("realtime messages-insert error:", err);
+      });
     return () => { supabase.removeChannel(channel); };
   }, [roomIdString]);
 
@@ -937,6 +940,13 @@ export default function ChatsScreen() {
     setRooms((prev) => prev.filter((r) => r.id !== room.id));
     optionsSheetRef.current?.hide();
     const code = room.code;
+    // Clean unread state for the leaving room
+    setUnreadRooms((prev) => { const next = new Set(prev); next.delete(code); return next; });
+    getItem(UNREAD_PHOTOS_KEY).then((raw) => {
+      const map = safeJsonParse(raw, {} as Record<string, boolean>);
+      delete map[code];
+      setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+    });
     leaveRoom(code).catch((e) => {
       console.error("Failed to leave room", code, e);
     }).finally(() => {
@@ -953,6 +963,17 @@ export default function ChatsScreen() {
     exitSelectMode();
 
     const codes = toLeave.map((room) => room.code);
+    // Clean unread state for all leaving rooms
+    setUnreadRooms((prev) => {
+      const next = new Set(prev);
+      codes.forEach((c) => next.delete(c));
+      return next;
+    });
+    getItem(UNREAD_PHOTOS_KEY).then((raw) => {
+      const map = safeJsonParse(raw, {} as Record<string, boolean>);
+      codes.forEach((c) => { delete map[c]; });
+      setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+    });
     Promise.allSettled(codes.map((code) => leaveRoom(code))).then((results) => {
       const failed = results
         .map((res, idx) => ({ res, code: codes[idx] }))

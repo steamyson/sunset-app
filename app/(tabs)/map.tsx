@@ -309,7 +309,13 @@ function NativeMap({ messages, myCoords }: {
                 shadowRadius: 6,
                 elevation: 6,
               }}>
-                <Image source={{ uri: thumbUrl(cluster.messages[0].photo_url, 96) }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                {cluster.messages[0]?.photo_url ? (
+                  <Image source={{ uri: thumbUrl(cluster.messages[0].photo_url, 96) }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+                ) : (
+                  <View style={{ width: 48, height: 48, backgroundColor: colors.mist, alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 20 }}>🌅</Text>
+                  </View>
+                )}
               </View>
               {/* Count badge — only at city scale, in normal flow so nothing clips it */}
               {cluster.messages.length > 1 && zoomedIn && (

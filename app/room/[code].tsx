@@ -575,6 +575,7 @@ export default function RoomThread() {
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${overlayRoomId}` },
         (payload: { new: Record<string, unknown> }) => {
           const row = payload.new;
+          if (!row || !row.id) return;
           const senderId = (row.sender_device_id ?? row.device_id ?? "") as string;
           if (senderId === myDeviceId) return;
 
@@ -607,7 +608,9 @@ export default function RoomThread() {
           }
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) console.error("realtime room-messages error:", err);
+      });
 
     return () => {
       supabase.removeChannel(channel);
