@@ -84,9 +84,10 @@ None yet.
 | 260403-5zt | Aesthetic consistency: interaction constants, activeOpacity sweep, spacing, reaction targets, feed press feedback, profile room navigation | 2026-04-03 | 2dec319 | [260403-5zt-aesthetic-consistency](./quick/260403-5zt-phase-1-aesthetic-consistency-interactio/) |
 | 260403-pen | Avatar bubbles on sky clouds: server-synced emoji circles on cloud edges | 2026-04-03 | eddf7a6 | [260403-pen-avatar-bubbles](./quick/260403-pen-phase-4d-avatar-bubbles-on-sky-clouds-se/) |
 | 260404-0gp | Sky header shows user's name; cloud naming input on room creation; room header pre-populated from nav param | 2026-04-04 | 14f0844 | [260404-0gp-sky-header](./quick/260404-0gp-sky-header-shows-users-name-cloud-naming/) |
+| 260404-kno | Security: sign post-media URLs in getPostsForRoom; strip members from join_room_by_code RPC | 2026-04-04 | a3e346f | [260404-kno-security-fixes](./quick/260404-kno-security-fixes-sign-post-media-urls-in-g/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-04 - Completed quick task 260404-0gp: Sky header personalization and cloud naming
+Last activity: 2026-04-04 - Completed quick task 260404-kno: Security fixes — signed post-media URLs and stripped members from join RPC
 Stopped at: Phase 02 complete. Quick tasks in progress.
 Resume file: None
