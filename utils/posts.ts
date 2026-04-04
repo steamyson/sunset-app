@@ -3,6 +3,40 @@ import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "./supabase";
 import { getExpiresAt } from "./sunset";
 import { base64ToArrayBuffer } from "./encoding";
+import { stripExifReencodeToJpeg } from "./imageUploadPrep";
+
+const GENERIC_ERR = "Something went wrong. Please try again.";
+
+const POST_MEDIA_BUCKET = "post-media";
+const SIGNED_URL_TTL_SEC = 86400;
+
+async function createSignedPostMediaUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from(POST_MEDIA_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    console.warn("createSignedPostMediaUrl", error?.message ?? "no signedUrl");
+    return path;
+  }
+  return data.signedUrl;
+}
+
+async function mapWithSignedPostMediaUrls(posts: Post[]): Promise<Post[]> {
+  if (!posts.length) return posts;
+  const keys = [...new Set(posts.map((p) => p.media_url).filter(Boolean))];
+  const resolved = new Map<string, string>();
+  await Promise.all(
+    keys.map(async (k) => {
+      resolved.set(k, await createSignedPostMediaUrl(k));
+    })
+  );
+  return posts.map((p) => ({ ...p, media_url: resolved.get(p.media_url) ?? p.media_url }));
+}
+
+function logAndThrow(scope: string, err: { message?: string } | null) {
+  if (err?.message) console.error(scope, err.message);
+  throw new Error(GENERIC_ERR);
+}
 
 export type Post = {
   id: string;
@@ -25,17 +59,18 @@ type CreatePostParams = {
 };
 
 async function uploadToPostMediaBucket(localUri: string, roomId: string, deviceId: string): Promise<string> {
-  const ext = ".jpg"; // camera flow already uses JPEG
+  const strippedUri = await stripExifReencodeToJpeg(localUri);
+  const ext = ".jpg";
   const filename = `${crypto.randomUUID?.() ?? Date.now().toString(36)}${ext}`;
   const path = `${roomId}/${deviceId}/${filename}`;
 
   let body: Blob | ArrayBuffer;
 
   if (Platform.OS === "web") {
-    const response = await fetch(localUri);
+    const response = await fetch(strippedUri);
     body = await response.blob();
   } else {
-    const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: "base64" });
+    const base64 = await FileSystem.readAsStringAsync(strippedUri, { encoding: "base64" });
     body = base64ToArrayBuffer(base64);
   }
 
@@ -43,9 +78,7 @@ async function uploadToPostMediaBucket(localUri: string, roomId: string, deviceI
     .from("post-media")
     .upload(path, body, { contentType: "image/jpeg", upsert: false });
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) logAndThrow("uploadToPostMediaBucket", error);
 
   return path;
 }
@@ -75,9 +108,8 @@ export async function createPost(params: CreatePostParams): Promise<Post> {
       .select("*")
       .single();
 
-    if (error || !data) {
-      throw new Error(error?.message ?? "Failed to insert post");
-    }
+    if (error) logAndThrow("createPost.insert", error);
+    if (!data) throw new Error(GENERIC_ERR);
 
     return data as Post;
   } catch (e) {
@@ -108,6 +140,6 @@ export async function getPostsForRoom(
     return [];
   }
 
-  return (data ?? []) as Post[];
+  return mapWithSignedPostMediaUrls((data ?? []) as Post[]);
 }
 
