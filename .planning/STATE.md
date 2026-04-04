@@ -86,9 +86,10 @@ None yet.
 | 260404-0gp | Sky header shows user's name; cloud naming input on room creation; room header pre-populated from nav param | 2026-04-04 | 14f0844 | [260404-0gp-sky-header](./quick/260404-0gp-sky-header-shows-users-name-cloud-naming/) |
 | 260404-kno | Security: sign post-media URLs in getPostsForRoom; strip members from join_room_by_code RPC | 2026-04-04 | a3e346f | [260404-kno-security-fixes](./quick/260404-kno-security-fixes-sign-post-media-urls-in-g/) |
 | 260404-luk | Security: devices table RLS policies (audit #13) and join_room_by_code rate limiting (audit #11) | 2026-04-04 | dd436b0 | [260404-luk-security-fixes](./quick/260404-luk-security-fixes-push-token-rls-policy-on-/) |
+| 260404-nqz | Whimsy UI 1: emoji mount spring and submit bloom animations on setup screen | 2026-04-04 | b1af826 | [260404-nqz-whimsy-ui-1](./quick/260404-nqz-whimsy-ui-1-animate-setup-screen-sunrise/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-04 - Completed quick task 260404-luk: Security fixes — devices table RLS and join_room_by_code rate limiting
+Last activity: 2026-04-04 - Completed quick task 260404-nqz: Whimsy UI 1 — animate setup screen sunrise emoji
 Stopped at: Phase 02 complete. Quick tasks in progress.
 Resume file: None
