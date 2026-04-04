@@ -5,23 +5,50 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Animated,
+  Easing,
 } from "react-native";
 import { Text } from "../components/Text";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { router } from "expo-router";
-import { setLocalNickname } from "../utils/identity";
+import { setLocalNickname, MAX_NICKNAME_LENGTH } from "../utils/identity";
 import { colors, interaction } from "../utils/theme";
 
 export default function SetupScreen() {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const emojiY = useRef(new Animated.Value(30)).current;
+  const emojiOpacity = useRef(new Animated.Value(0)).current;
+  const bloomScale = useRef(new Animated.Value(1)).current;
+  const bloomOpacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(emojiY, { toValue: 0, tension: 120, friction: 8, useNativeDriver: true }),
+      Animated.spring(emojiOpacity, { toValue: 1, tension: 120, friction: 8, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
   async function handleContinue() {
     const trimmed = name.trim();
     if (!trimmed) return;
     setSaving(true);
     await setLocalNickname(trimmed);
-    router.replace("/");
+    Animated.parallel([
+      Animated.timing(bloomScale, {
+        toValue: 1.8,
+        duration: 400,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(bloomOpacity, {
+        toValue: 0,
+        duration: 400,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => router.replace("/"));
   }
 
   return (
@@ -30,7 +57,12 @@ export default function SetupScreen() {
       style={{ flex: 1, backgroundColor: colors.sky }}
     >
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
-        <Text style={{ fontSize: 64, marginBottom: 8 }}>🌅</Text>
+        <Animated.View style={{
+          transform: [{ translateY: emojiY }, { scale: bloomScale }],
+          opacity: Animated.multiply(emojiOpacity, bloomOpacity),
+        }}>
+          <Text style={{ fontSize: 64, marginBottom: 8 }}>🌅</Text>
+        </Animated.View>
 
         <Text style={{
           fontSize: 32, fontWeight: "900", color: colors.charcoal,
@@ -52,7 +84,7 @@ export default function SetupScreen() {
           placeholder="Your first name or nickname"
           placeholderTextColor={colors.ash}
           autoFocus
-          maxLength={24}
+          maxLength={MAX_NICKNAME_LENGTH}
           returnKeyType="done"
           onSubmitEditing={handleContinue}
           style={{
