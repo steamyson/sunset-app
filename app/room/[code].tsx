@@ -109,7 +109,7 @@ function hasPhotoUrl(photoUrl: string | null | undefined): photoUrl is string {
 }
 
 export default function RoomThread() {
-  const params = useLocalSearchParams<{ code: string; unread?: string }>();
+  const params = useLocalSearchParams<{ code: string; unread?: string; name?: string }>();
   const code = params.code;
 
   const handleBack = useCallback(() => {
@@ -123,7 +123,7 @@ export default function RoomThread() {
     return () => sub.remove();
   }, [handleBack]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [nickname, setNickname] = useState<string | null>(null);
+  const [nickname, setNickname] = useState<string | null>(params.name || null);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<ReactionMap>({});
