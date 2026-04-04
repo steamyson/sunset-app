@@ -87,9 +87,10 @@ None yet.
 | 260404-kno | Security: sign post-media URLs in getPostsForRoom; strip members from join_room_by_code RPC | 2026-04-04 | a3e346f | [260404-kno-security-fixes](./quick/260404-kno-security-fixes-sign-post-media-urls-in-g/) |
 | 260404-luk | Security: devices table RLS policies (audit #13) and join_room_by_code rate limiting (audit #11) | 2026-04-04 | dd436b0 | [260404-luk-security-fixes](./quick/260404-luk-security-fixes-push-token-rls-policy-on-/) |
 | 260404-nqz | Whimsy UI 1: emoji mount spring and submit bloom animations on setup screen | 2026-04-04 | b1af826 | [260404-nqz-whimsy-ui-1](./quick/260404-nqz-whimsy-ui-1-animate-setup-screen-sunrise/) |
+| 260404-nu2 | Whimsy UI 2: CloudCard staggered spring-in entry animation (scale 0.88->1, opacity 0->1, delay seed*60ms) | 2026-04-04 | d4d2f30 | [260404-nu2-cloudcard-spring](./quick/260404-nu2-whimsy-ui-2-cloudcard-staggered-spring-i/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-04 - Completed quick task 260404-nqz: Whimsy UI 1 — animate setup screen sunrise emoji
+Last activity: 2026-04-04 - Completed quick task 260404-nu2: Whimsy UI 2 — CloudCard staggered spring-in animation
 Stopped at: Phase 02 complete. Quick tasks in progress.
 Resume file: None
