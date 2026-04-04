@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { View, TouchableOpacity } from "react-native";
+import { Animated, View, TouchableOpacity } from "react-native";
 import { Text } from "./Text";
 import { colors, interaction } from "../utils/theme";
 import { toggleReaction, type MessageReactions } from "../utils/reactions";
@@ -19,6 +19,9 @@ interface Props {
 export function ReactionBar({ messageId, deviceId, reactions, onUpdate, onSpawnParticle }: Props) {
   const [pending, setPending] = useState<string | null>(null);
   const buttonRefs = useRef<Record<string, View | null>>({});
+  const scaleAnims = useRef<Record<string, Animated.Value>>(
+    Object.fromEntries(EMOJIS.map((e) => [e, new Animated.Value(1)]))
+  ).current;
 
   async function handlePress(emoji: string) {
     if (pending) return;
@@ -32,6 +35,16 @@ export function ReactionBar({ messageId, deviceId, reactions, onUpdate, onSpawnP
       btn?.measureInWindow((x, y, w, h) => {
         onSpawnParticle(x + w / 2, y + h / 2, EMOJI_COLORS[emoji] ?? colors.ember);
       });
+    }
+
+    // Scale pop animation on add
+    if (!isMine) {
+      const sv = scaleAnims[emoji];
+      sv.setValue(1);
+      Animated.sequence([
+        Animated.spring(sv, { toValue: 1.4, useNativeDriver: true, speed: 28 }),
+        Animated.spring(sv, { toValue: 1, useNativeDriver: true, speed: 16 }),
+      ]).start();
     }
 
     try {
@@ -67,7 +80,9 @@ export function ReactionBar({ messageId, deviceId, reactions, onUpdate, onSpawnP
               opacity: pending === emoji ? 0.6 : 1,
             }}
           >
-            <Text style={{ fontSize: 16, lineHeight: 20 }}>{emoji}</Text>
+            <Animated.View style={{ transform: [{ scale: scaleAnims[emoji] }] }}>
+              <Text style={{ fontSize: 16, lineHeight: 20 }}>{emoji}</Text>
+            </Animated.View>
             {count > 0 && (
               <Text style={{ fontSize: 12, fontWeight: "700", color: isMine ? colors.ember : colors.ash }}>
                 {count}
