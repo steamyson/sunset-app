@@ -1,4 +1,11 @@
 import { supabase, Room } from "./supabase";
+
+const GENERIC_ERR = "Something went wrong. Please try again.";
+
+function logAndThrow(scope: string, err: { message?: string } | null) {
+  if (err?.message) console.error(scope, err.message);
+  throw new Error(GENERIC_ERR);
+}
 import { getDeviceId } from "./device";
 import { getItem, setItem, safeJsonParse } from "./storage";
 import { assignDefaultRoomNickname } from "./nicknames";
@@ -63,7 +70,7 @@ export async function createRoom(): Promise<Room> {
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("createRoom.insert", error);
 
   await addLocalRoomCode(code);
   await assignDefaultRoomNickname(code);
@@ -75,12 +82,21 @@ export async function joinRoom(code: string): Promise<Room> {
   const deviceId = await getDeviceId();
   const upperCode = code.trim().toUpperCase();
 
-  const { data: room, error } = await supabase.rpc("join_room_by_code", {
+  const { data: rpcResult, error } = await supabase.rpc("join_room_by_code", {
     p_code: upperCode,
     p_device_id: deviceId,
   });
-  if (error) throw new Error(error.message);
-  if (!room) throw new Error("Room not found. Check the code and try again.");
+  if (error) logAndThrow("joinRoom", error);
+  if (!rpcResult) throw new Error("Room not found. Check the code and try again.");
+
+  // RPC no longer returns members to avoid leaking device IDs.
+  // Fetch the full room via direct table query (allowed since device is now a member).
+  const { data: room, error: fetchError } = await supabase
+    .from("rooms")
+    .select("*")
+    .eq("code", upperCode)
+    .single();
+  if (fetchError) logAndThrow("joinRoom.fetch", fetchError);
 
   await addLocalRoomCode(upperCode);
   await assignDefaultRoomNickname(upperCode);
@@ -98,7 +114,7 @@ export async function fetchMyRooms(): Promise<Room[]> {
     .in("code", codes)
     .order("created_at", { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("fetchMyRooms", error);
   return (data ?? []) as Room[];
 }
 
@@ -120,7 +136,7 @@ export async function leaveRoom(code: string): Promise<void> {
     p_code: upperCode,
     p_device_id: deviceId,
   });
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("leaveRoom", error);
 
   await removeLocalRoomCode(upperCode);
   invalidateRoomCache();
