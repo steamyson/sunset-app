@@ -1268,7 +1268,7 @@ export default function ChatsScreen() {
             <Text
               numberOfLines={1}
               ellipsizeMode="clip"
-              style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, maxWidth: 180, textAlign: "center" }}
+              style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, textAlign: "center" }}
             >
               {userName ? `${userName}'s Sky` : "Your Sky"}
             </Text>
