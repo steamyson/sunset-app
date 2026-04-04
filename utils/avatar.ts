@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { getItem, setItem, safeJsonParse } from "./storage";
-import { supabase } from "./supabase";
+import { supabase, setDeviceSession } from "./supabase";
 
 const KEY = "dusk_avatar";
 
@@ -61,13 +61,20 @@ export async function syncAvatarToServer(
   deviceId: string,
   avatar: Avatar
 ): Promise<void> {
+  // Ensure the Postgres session variable is set on the connection that will
+  // handle our storage upload and DB update. Connection pooling means the
+  // variable set at app init may not survive to this request.
+  await setDeviceSession(deviceId);
+
   let value: string | null = null;
 
   if (avatar.type === "preset") {
     value = avatar.id;
   } else {
-    // Same path pattern as message uploads — `photos` RLS expects `{device_id}/...`
-    const path = `${deviceId}/avatar.jpg`;
+    // Unique path per upload (like message photos) — the photos bucket RLS
+    // only allows INSERT, not UPDATE, so upsert on a fixed path fails on
+    // the second upload. A unique filename also naturally cache-busts.
+    const path = `${deviceId}/avatar_${Date.now()}.jpg`;
     let body: Blob | ArrayBuffer;
     if (Platform.OS === "web") {
       const response = await fetch(avatar.uri);
@@ -80,7 +87,7 @@ export async function syncAvatarToServer(
     }
     const { error: uploadError } = await supabase.storage
       .from("photos")
-      .upload(path, body, { contentType: "image/jpeg", upsert: true });
+      .upload(path, body, { contentType: "image/jpeg", upsert: false });
     if (uploadError) throw new Error(uploadError.message);
     const { data } = supabase.storage.from("photos").getPublicUrl(path);
     value = `photo:${data.publicUrl}`;
