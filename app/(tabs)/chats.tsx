@@ -44,7 +44,7 @@ import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
 import { colors, interaction, spacing } from "../../utils/theme";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
-import { fetchMemberAvatars, type AvatarPreset } from "../../utils/avatar";
+import { fetchMemberAvatars, type Avatar } from "../../utils/avatar";
 import type { Room } from "../../utils/supabase";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import { CONTINENTS } from "../../continents";
@@ -111,7 +111,7 @@ export default function ChatsScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [nicknames, setNicknames] = useState<Record<string, string>>({});
   const [unreadRooms, setUnreadRooms] = useState<Set<string>>(new Set());
-  const [memberAvatars, setMemberAvatars] = useState<Record<string, AvatarPreset>>({});
+  const [memberAvatars, setMemberAvatars] = useState<Record<string, Avatar>>({});
   const [loading, setLoading] = useState(true);
 
   // Add room sheet
@@ -1627,7 +1627,7 @@ function GlobeCloudItem({
   cy: number;
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
-  memberAvatars: Record<string, AvatarPreset>;
+  memberAvatars: Record<string, Avatar>;
   onPress: () => void;
 }) {
   const animatedStyle = useAnimatedStyle(() => {
@@ -1755,7 +1755,7 @@ function GlobeView({
   rooms: Room[];
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
-  memberAvatars: Record<string, AvatarPreset>;
+  memberAvatars: Record<string, Avatar>;
   onClose: () => void;
   onEnterRoom: (room: Room) => void;
   zoomLevel: Animated.Value;

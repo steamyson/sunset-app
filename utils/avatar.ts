@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { getItem, setItem, safeJsonParse } from "./storage";
 import { supabase } from "./supabase";
 
@@ -47,35 +49,69 @@ export async function persistPhotoUri(uri: string): Promise<string> {
 
 // ─── Server sync ──────────────────────────────────────────────────────────────
 
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const bin = atob(base64);
+  const buf = new ArrayBuffer(bin.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+  return buf;
+}
+
 export async function syncAvatarToServer(
   deviceId: string,
   avatar: Avatar
 ): Promise<void> {
-  await supabase
+  let value: string | null = null;
+
+  if (avatar.type === "preset") {
+    value = avatar.id;
+  } else {
+    // Same path pattern as message uploads — `photos` RLS expects `{device_id}/...`
+    const path = `${deviceId}/avatar.jpg`;
+    let body: Blob | ArrayBuffer;
+    if (Platform.OS === "web") {
+      const response = await fetch(avatar.uri);
+      body = await response.blob();
+    } else {
+      const base64 = await FileSystem.readAsStringAsync(avatar.uri, {
+        encoding: "base64",
+      });
+      body = base64ToArrayBuffer(base64);
+    }
+    const { error: uploadError } = await supabase.storage
+      .from("photos")
+      .upload(path, body, { contentType: "image/jpeg", upsert: true });
+    if (uploadError) throw new Error(uploadError.message);
+    const { data } = supabase.storage.from("photos").getPublicUrl(path);
+    value = `photo:${data.publicUrl}`;
+  }
+
+  const { error: updateError } = await supabase
     .from("devices")
-    .upsert({
-      device_id: deviceId,
-      avatar_preset_id: avatar.type === "preset" ? avatar.id : null,
-    });
+    .update({ avatar_preset_id: value })
+    .eq("device_id", deviceId);
+  if (updateError) throw new Error(updateError.message);
+
+  delete avatarCache[deviceId];
 }
 
 // In-memory avatar cache (short TTL — avatars rarely change)
-const avatarCache: Record<string, { preset: AvatarPreset; ts: number }> = {};
+const avatarCache: Record<string, { avatar: Avatar; ts: number }> = {};
 const AVATAR_TTL = 60_000;
 
 export async function fetchMemberAvatars(
   deviceIds: string[]
-): Promise<Record<string, AvatarPreset>> {
+): Promise<Record<string, Avatar>> {
   if (!deviceIds.length) return {};
 
   const now = Date.now();
-  const result: Record<string, AvatarPreset> = {};
+  const result: Record<string, Avatar> = {};
   const uncached: string[] = [];
 
   for (const id of deviceIds) {
     const entry = avatarCache[id];
     if (entry && now - entry.ts < AVATAR_TTL) {
-      result[id] = entry.preset;
+      result[id] = entry.avatar;
     } else {
       uncached.push(id);
     }
@@ -89,10 +125,16 @@ export async function fetchMemberAvatars(
 
     for (const row of data ?? []) {
       if (!row.avatar_preset_id) continue;
-      const preset = PRESET_AVATARS.find((p) => p.id === row.avatar_preset_id);
-      if (!preset) continue;
-      result[row.device_id] = preset;
-      avatarCache[row.device_id] = { preset, ts: now };
+      let avatar: Avatar;
+      if (row.avatar_preset_id.startsWith("photo:")) {
+        avatar = { type: "photo", uri: row.avatar_preset_id.slice(6) };
+      } else {
+        const preset = PRESET_AVATARS.find((p) => p.id === row.avatar_preset_id);
+        if (!preset) continue;
+        avatar = preset;
+      }
+      result[row.device_id] = avatar;
+      avatarCache[row.device_id] = { avatar, ts: now };
     }
   }
 

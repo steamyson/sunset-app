@@ -1,8 +1,8 @@
-import { View, Animated, Easing, Dimensions } from "react-native";
+import { View, Image, Animated, Easing, Dimensions } from "react-native";
 import Svg, { Circle, Ellipse } from "react-native-svg";
 import { Text } from "./Text";
 import { colors } from "../utils/theme";
-import type { AvatarPreset } from "../utils/avatar";
+import type { Avatar } from "../utils/avatar";
 import { forwardRef, useEffect, useRef } from "react";
 
 // Sunset color layers — unread pulse on sky canvas (bleed through semi-transparent cloud)
@@ -114,7 +114,7 @@ type CloudProps = {
   lifted?: boolean;
   variant?: number;
   hideLabel?: boolean;
-  avatars?: AvatarPreset[];
+  avatars?: Avatar[];
 };
 
 export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
@@ -197,20 +197,29 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
           }}>
             {avatars.slice(0, 3).map((av, i) => (
               <View
-                key={av.id}
+                key={av.type === "preset" ? av.id : av.uri}
                 style={{
                   width: 18,
                   height: 18,
                   borderRadius: 9,
-                  backgroundColor: av.bg,
+                  backgroundColor: av.type === "preset" ? av.bg : colors.mist,
                   alignItems: "center",
                   justifyContent: "center",
                   borderWidth: 1.5,
                   borderColor: "#FFFDF8",
+                  overflow: "hidden",
                   marginRight: i > 0 ? -6 : 0,
                 }}
               >
-                <Text style={{ fontSize: 10, lineHeight: 13 }}>{av.emoji}</Text>
+                {av.type === "preset" ? (
+                  <Text style={{ fontSize: 10, lineHeight: 13 }}>{av.emoji}</Text>
+                ) : (
+                  <Image
+                    source={{ uri: av.uri }}
+                    style={{ width: 18, height: 18 }}
+                    resizeMode="cover"
+                  />
+                )}
               </View>
             ))}
           </View>

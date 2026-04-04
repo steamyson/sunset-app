@@ -206,7 +206,17 @@ export default function ProfileScreen() {
       await saveAvatar(newAvatar);
       setAvatar(newAvatar);
       setShowAvatarPicker(false);
-      getDeviceId().then((id) => { if (id) syncAvatarToServer(id, newAvatar); }).catch(() => {});
+      getDeviceId()
+        .then(async (id) => {
+          if (!id) return;
+          try {
+            await syncAvatarToServer(id, newAvatar);
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : "Sync failed";
+            Alert.alert("Could not upload profile photo", msg);
+          }
+        })
+        .catch(() => {});
     } catch {
       Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
     }
@@ -217,7 +227,17 @@ export default function ProfileScreen() {
     await saveAvatar(preset);
     setAvatar(preset);
     setShowAvatarPicker(false);
-    getDeviceId().then((id) => { if (id) syncAvatarToServer(id, preset); }).catch(() => {});
+    getDeviceId()
+      .then(async (id) => {
+        if (!id) return;
+        try {
+          await syncAvatarToServer(id, preset);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Sync failed";
+          Alert.alert("Could not sync avatar", msg);
+        }
+      })
+      .catch(() => {});
   }
 
   async function handleCreateRoom() {
