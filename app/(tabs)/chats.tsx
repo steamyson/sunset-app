@@ -8,18 +8,20 @@ import {
   Share,
   Alert,
   Animated,
-  Easing,
+  Easing as RNEasing,
   Dimensions,
   InteractionManager,
   PanResponder,
   StyleSheet,
 } from "react-native";
 import AnimatedReanimated, {
+  Easing,
   useSharedValue,
   useAnimatedStyle,
   useAnimatedProps,
   withDecay,
   withRepeat,
+  withSequence,
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -40,6 +42,7 @@ import { getDeviceId } from "../../utils/device";
 import { leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../utils/roomCache";
 import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
+import { getLocalNickname } from "../../utils/identity";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
 import { colors, interaction, spacing } from "../../utils/theme";
@@ -120,6 +123,9 @@ export default function ChatsScreen() {
   const [addLoading, setAddLoading] = useState<"join" | "create" | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [newlyCreatedCode, setNewlyCreatedCode] = useState<string | null>(null);
+
+  const [userName, setUserName] = useState<string | null>(null);
+  const [newCloudName, setNewCloudName] = useState("");
 
   // Rename modal
   const [renaming, setRenaming] = useState<Room | null>(null);
@@ -211,12 +217,12 @@ export default function ChatsScreen() {
   // Globe entry point stays at 0.35 — user can pinch further to 0.18 floor
   const goToGlobe = useCallback(() => {
     zoomValueRef.current = 0.35;
-    Animated.timing(zoomLevel, { toValue: 0.35, duration: 400, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }).start();
+    Animated.timing(zoomLevel, { toValue: 0.35, duration: 400, easing: RNEasing.inOut(RNEasing.cubic), useNativeDriver: false }).start();
   }, [zoomLevel]);
 
   const goToSky = useCallback(() => {
     zoomValueRef.current = 1;
-    Animated.timing(zoomLevel, { toValue: 1, duration: 400, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(zoomLevel, { toValue: 1, duration: 400, easing: RNEasing.inOut(RNEasing.cubic), useNativeDriver: true }).start();
   }, [zoomLevel]);
 
   const [viewMode, setViewMode] = useState<"sky" | "globe">("sky");
@@ -267,6 +273,10 @@ export default function ChatsScreen() {
   // Stop all loops on unmount
   useEffect(() => {
     return () => { Object.values(cloudLoopsRef.current).forEach((l) => l.stop()); };
+  }, []);
+
+  useEffect(() => {
+    getLocalNickname().then((n) => { if (n) setUserName(n); });
   }, []);
 
   // Load saved cloud positions from SecureStore on mount — set positionsLoaded when done so layout effect can proceed
@@ -591,22 +601,22 @@ export default function ChatsScreen() {
         Animated.sequence(
           startToRight
             ? [
-                Animated.timing(driftX, { toValue: driftAmt, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                Animated.timing(driftX, { toValue: -driftAmt, duration: durationX, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: driftAmt, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: -driftAmt, duration: durationX, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
               ]
             : [
-                Animated.timing(driftX, { toValue: -driftAmt, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                Animated.timing(driftX, { toValue: driftAmt, duration: durationX, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: -driftAmt, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: driftAmt, duration: durationX, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
               ]
         )
       );
       const loopY = Animated.loop(
         Animated.sequence([
-          Animated.timing(driftY, { toValue: driftAmt, duration: durationY, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-          Animated.timing(driftY, { toValue: -driftAmt, duration: durationY * 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-          Animated.timing(driftY, { toValue: 0, duration: durationY, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+          Animated.timing(driftY, { toValue: driftAmt, duration: durationY, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+          Animated.timing(driftY, { toValue: -driftAmt, duration: durationY * 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+          Animated.timing(driftY, { toValue: 0, duration: durationY, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
         ])
       );
 
@@ -632,22 +642,22 @@ export default function ChatsScreen() {
           Animated.sequence(
             goRight
               ? [
-                  Animated.timing(driftX, { toValue: driftAmt, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                  Animated.timing(driftX, { toValue: -driftAmt, duration: durationX, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                  Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: driftAmt, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: -driftAmt, duration: durationX, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
                 ]
               : [
-                  Animated.timing(driftX, { toValue: -driftAmt, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                  Animated.timing(driftX, { toValue: driftAmt, duration: durationX, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-                  Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: -driftAmt, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: driftAmt, duration: durationX, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+                  Animated.timing(driftX, { toValue: 0, duration: durationX / 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
                 ]
           )
         );
         const loopYNew = Animated.loop(
           Animated.sequence([
-            Animated.timing(driftY, { toValue: driftAmt, duration: durationY, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-            Animated.timing(driftY, { toValue: -driftAmt, duration: durationY * 2, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-            Animated.timing(driftY, { toValue: 0, duration: durationY, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+            Animated.timing(driftY, { toValue: driftAmt, duration: durationY, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+            Animated.timing(driftY, { toValue: -driftAmt, duration: durationY * 2, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
+            Animated.timing(driftY, { toValue: 0, duration: durationY, easing: RNEasing.inOut(RNEasing.sin), useNativeDriver: false }),
           ])
         );
         loopXNew.start();
@@ -711,15 +721,15 @@ export default function ChatsScreen() {
       Animated.timing(tapBloomScale, {
         toValue: 40,
         duration: 700,
-        easing: Easing.in(Easing.ease),
+        easing: RNEasing.in(RNEasing.ease),
         useNativeDriver: true,
       }).start(({ finished }) => {
         if (finished) {
           router.push({
             pathname: "/room/[code]",
             params: unread
-              ? { code: room.code, unread: "true" }
-              : { code: room.code },
+              ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" }
+              : { code: room.code, name: nicknames[room.code] ?? "" },
           });
           if (unread) markRoomReadAfterNav(room.code);
         }
@@ -898,7 +908,7 @@ export default function ChatsScreen() {
             // Fallback: measureInWindow returned zeros — plain push
             router.push({
               pathname: "/room/[code]",
-              params: unread ? { code: room.code, unread: "true" } : { code: room.code },
+              params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
             });
             if (unread) markRoomReadAfterNav(room.code);
             return;
@@ -912,7 +922,7 @@ export default function ChatsScreen() {
         // No ref — fallback to plain push
         router.push({
           pathname: "/room/[code]",
-          params: unread ? { code: room.code, unread: "true" } : { code: room.code },
+          params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
         });
         if (unread) markRoomReadAfterNav(room.code);
       }
@@ -1153,7 +1163,7 @@ export default function ChatsScreen() {
                     setTimeout(() => {
                       router.push({
                         pathname: "/room/[code]",
-                        params: unread ? { code: room.code, unread: "true" } : { code: room.code },
+                        params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
                       });
                     }, 420);
                   }}
@@ -1260,7 +1270,7 @@ export default function ChatsScreen() {
               ellipsizeMode="clip"
               style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, maxWidth: 180, textAlign: "center" }}
             >
-              Your Sky
+              {userName ? `${userName}'s Sky` : "Your Sky"}
             </Text>
           </View>
           <View style={{ flex: 1, alignItems: "flex-end" }}>
@@ -1327,28 +1337,57 @@ export default function ChatsScreen() {
         visible={showAddRoom}
         transparent
         animationType="slide"
-        onRequestClose={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setJoinCode(""); setAddError(null); }}
+        onRequestClose={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); setJoinCode(""); setAddError(null); }}
       >
         <TouchableOpacity
           style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.4)", justifyContent: "flex-end" }}
           activeOpacity={1}
-          onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setJoinCode(""); setAddError(null); }}
+          onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); setJoinCode(""); setAddError(null); }}
         >
           <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
             {newlyCreatedCode ? (
               <>
                 <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
-                <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 20 }}>
+                <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 16 }}>
                   <Text style={{ fontSize: 42, fontWeight: "900", color: colors.charcoal, letterSpacing: 10 }}>{newlyCreatedCode}</Text>
                 </View>
+                <TextInput
+                  value={newCloudName}
+                  onChangeText={setNewCloudName}
+                  placeholder="Name this cloud (optional)"
+                  placeholderTextColor={colors.ash}
+                  autoCorrect={false}
+                  style={{
+                    backgroundColor: "white", borderWidth: 2,
+                    borderColor: newCloudName.length > 0 ? colors.ember : colors.mist,
+                    borderRadius: 16, paddingHorizontal: 20, paddingVertical: 14,
+                    fontSize: 16, color: colors.charcoal, textAlign: "center", marginBottom: 12,
+                  }}
+                />
+                {newCloudName.trim().length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      const name = newCloudName.trim();
+                      setRoomNickname(newlyCreatedCode, name);
+                      setNicknames((prev) => ({ ...prev, [newlyCreatedCode]: name }));
+                      setShowAddRoom(false);
+                      setNewlyCreatedCode(null);
+                      setNewCloudName("");
+                    }}
+                    activeOpacity={interaction.activeOpacitySubtle}
+                    style={{ backgroundColor: colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
+                  >
+                    <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Save Name</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   onPress={() => handleShareCode(newlyCreatedCode)}
-                  style={{ backgroundColor: colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
+                  style={{ backgroundColor: newCloudName.trim().length > 0 ? colors.sky : colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
                 >
-                  <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Share Code</Text>
+                  <Text style={{ fontSize: 17, fontWeight: "800", color: newCloudName.trim().length > 0 ? colors.charcoal : colors.cream }}>Share Code</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); }}
+                  onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); }}
                   style={{ paddingVertical: 12, alignItems: "center" }}
                 >
                   <Text style={{ fontSize: 14, color: colors.ash }}>Done</Text>
@@ -1674,27 +1713,48 @@ function GlobeCloudItem({
   );
 }
 
-// ─── Constellation lines — connect rooms with shared members ─────────────────
+// ─── Constellation lines — great-circle arcs between rooms sharing members ───
+const CONSTELLATION_SEGMENTS = 20;
+
 function ConstellationLines({
-  rooms, rotLon, rotLat, cloudOrbitLon, cx, cy,
+  rooms,
+  rotLon,
+  rotLat,
+  cloudOrbitLon,
+  cx,
+  cy,
 }: {
   rooms: Room[];
-  rotLon: SharedNum; rotLat: SharedNum; cloudOrbitLon: SharedNum;
-  cx: number; cy: number;
+  rotLon: SharedNum;
+  rotLat: SharedNum;
+  cloudOrbitLon: SharedNum;
+  cx: number;
+  cy: number;
 }) {
-  // Pre-compute which room pairs share members
   const pairs = useMemo(() => {
-    const result: { aLon: number; aLat: number; aOff: number; bLon: number; bLat: number; bOff: number }[] = [];
+    const result: {
+      aLon: number;
+      aLat: number;
+      aOff: number;
+      bLon: number;
+      bLat: number;
+      bOff: number;
+    }[] = [];
     for (let i = 0; i < rooms.length; i++) {
       for (let j = i + 1; j < rooms.length; j++) {
-        const a = rooms[i], b = rooms[j];
+        const a = rooms[i];
+        const b = rooms[j];
         const shared = a.members.some((m) => b.members.includes(m));
         if (shared) {
           const posA = roomGlobePos(a.code);
           const posB = roomGlobePos(b.code);
           result.push({
-            aLon: posA.lon, aLat: posA.lat, aOff: cloudLonOffset(a.id),
-            bLon: posB.lon, bLat: posB.lat, bOff: cloudLonOffset(b.id),
+            aLon: posA.lon,
+            aLat: posA.lat,
+            aOff: cloudLonOffset(a.id),
+            bLon: posB.lon,
+            bLat: posB.lat,
+            bOff: cloudLonOffset(b.id),
           });
         }
       }
@@ -1702,28 +1762,92 @@ function ConstellationLines({
     return result;
   }, [rooms]);
 
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
+        withTiming(0, { duration: 3200, easing: Easing.inOut(Easing.sin) })
+      ),
+      -1,
+      false
+    );
+  }, []);
+
   const animatedProps = useAnimatedProps(() => {
     "worklet";
+    const clampLat = (v: number) => Math.max(-0.6, Math.min(0.6, v));
+    const rl = rotLon.value;
+    const rlat = rotLat.value;
+    const orbit = cloudOrbitLon.value;
+    const strokeOpacity = 0.18 + pulse.value * 0.24;
+
     let d = "";
     for (const p of pairs) {
-      const steps = 12;
-      let visible = false;
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const lon = p.aLon + (p.bLon - p.aLon) * t + rotLon.value + (p.aOff + (p.bOff - p.aOff) * t) + cloudOrbitLon.value;
-        const lat = p.aLat + (p.bLat - p.aLat) * t + rotLat.value;
-        const cLat = Math.max(-0.6, Math.min(0.6, lat));
-        const x3 = Math.cos(cLat) * Math.sin(lon);
-        const y3 = Math.sin(cLat);
-        const z3 = Math.cos(cLat) * Math.cos(lon);
-        if (z3 <= 0) continue;
-        const sx = cx + x3 * GLOBE_R;
-        const sy = cy - y3 * GLOBE_R;
-        if (!visible) { d += `M${sx},${sy} `; visible = true; }
-        else { d += `L${sx},${sy} `; }
+      const lonA = p.aLon + rl + p.aOff + orbit;
+      const latA = clampLat(p.aLat + rlat);
+      const lonB = p.bLon + rl + p.bOff + orbit;
+      const latB = clampLat(p.bLat + rlat);
+
+      let ax = Math.cos(latA) * Math.sin(lonA);
+      let ay = Math.sin(latA);
+      let az = Math.cos(latA) * Math.cos(lonA);
+      let bx = Math.cos(latB) * Math.sin(lonB);
+      let by = Math.sin(latB);
+      let bz = Math.cos(latB) * Math.cos(lonB);
+
+      let dot = ax * bx + ay * by + az * bz;
+      dot = Math.max(-1, Math.min(1, dot));
+      let omega = Math.acos(dot);
+
+      const steps = CONSTELLATION_SEGMENTS;
+
+      const sample = (t: number) => {
+        let vx: number;
+        let vy: number;
+        let vz: number;
+        if (omega < 1e-5) {
+          vx = ax + (bx - ax) * t;
+          vy = ay + (by - ay) * t;
+          vz = az + (bz - az) * t;
+          const len = Math.hypot(vx, vy, vz) || 1;
+          vx /= len;
+          vy /= len;
+          vz /= len;
+        } else {
+          const sinO = Math.sin(omega);
+          const s0 = Math.sin((1 - t) * omega) / sinO;
+          const s1 = Math.sin(t * omega) / sinO;
+          vx = ax * s0 + bx * s1;
+          vy = ay * s0 + by * s1;
+          vz = az * s0 + bz * s1;
+        }
+        return {
+          sx: cx + vx * GLOBE_R,
+          sy: cy - vy * GLOBE_R,
+          z: vz,
+        };
+      };
+
+      let chainBroken = true;
+      for (let s = 0; s < steps; s++) {
+        const p0 = sample(s / steps);
+        const p1 = sample((s + 1) / steps);
+        const midZ = (p0.z + p1.z) / 2;
+        if (midZ <= 0) {
+          chainBroken = true;
+          continue;
+        }
+        if (chainBroken) {
+          d += `M${p0.sx} ${p0.sy}L${p1.sx} ${p1.sy}`;
+          chainBroken = false;
+        } else {
+          d += `L${p1.sx} ${p1.sy}`;
+        }
       }
     }
-    return { d: d || "M0,0" };
+
+    return { d: d || "M0 0", strokeOpacity };
   });
 
   if (pairs.length === 0) return null;
@@ -1734,7 +1858,6 @@ function ConstellationLines({
         animatedProps={animatedProps}
         stroke={colors.lavender}
         strokeWidth={1.5}
-        strokeOpacity={0.3}
         fill="none"
       />
     </Svg>
@@ -1920,8 +2043,16 @@ function GlobeView({
         </View>
       </View>
 
-      {/* Foreground: clouds + hint — pan handlers so dragging on clouds also rotates globe */}
+      {/* Foreground: constellation arcs, clouds + hint — pan handlers so dragging on clouds also rotates globe */}
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none" {...globePan.current.panHandlers}>
+        <ConstellationLines
+          rooms={displayRooms}
+          rotLon={rotLon}
+          rotLat={rotLat}
+          cloudOrbitLon={cloudOrbitLon}
+          cx={cx}
+          cy={cy}
+        />
         {displayRooms.map((room) => (
           <GlobeCloudItem
             key={room.id}
