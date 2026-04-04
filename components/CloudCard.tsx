@@ -1,4 +1,5 @@
-import { View } from "react-native";
+import { useRef, useEffect } from "react";
+import { Animated } from "react-native";
 import type { ViewStyle } from "react-native";
 
 export function CloudCard({
@@ -14,9 +15,27 @@ export function CloudCard({
   style?: ViewStyle;
   innerStyle?: ViewStyle;
 }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const numSeed = typeof seed === "string" ? seed.length : seed;
+    const delay = numSeed * 60;
+    const timeout = setTimeout(() => {
+      Animated.spring(anim, {
+        toValue: 1,
+        tension: 120,
+        friction: 8,
+        useNativeDriver: true,
+      }).start();
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] });
+
   return (
-    <View style={[{ marginTop: 12 }, style]}>
-      <View
+    <Animated.View style={[{ marginTop: 12, opacity: anim, transform: [{ scale }] }, style]}>
+      <Animated.View
         style={[
           {
             backgroundColor: bg,
@@ -31,7 +50,7 @@ export function CloudCard({
         ]}
       >
         {children}
-      </View>
-    </View>
+      </Animated.View>
+    </Animated.View>
   );
 }
