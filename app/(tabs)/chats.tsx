@@ -1264,11 +1264,12 @@ export default function ChatsScreen() {
               </TouchableOpacity>
             )}
           </View>
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
+          <View style={{ flex: 2, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
             <Text
               numberOfLines={1}
-              ellipsizeMode="clip"
-              style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, textAlign: "center" }}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+              style={{ fontSize: 32, fontWeight: "800", color: colors.ember, letterSpacing: -0.5, textAlign: "center", width: "100%" }}
             >
               {userName ? `${userName}'s Sky` : "Your Sky"}
             </Text>
