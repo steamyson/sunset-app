@@ -39,9 +39,9 @@ import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
 import { getItem, setItem, safeJsonParse } from "../../utils/storage";
 import { getDeviceId } from "../../utils/device";
-import { leaveRoom, createRoom, joinRoom } from "../../utils/rooms";
+import { leaveRoom, createRoom, joinRoom, syncSharedRoomNickname } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../utils/roomCache";
-import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
+import { getAllNicknames, setRoomNickname as persistLocalRoomNickname, syncLocalNicknamesFromRooms } from "../../utils/nicknames";
 import { getLocalNickname } from "../../utils/identity";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
@@ -52,6 +52,11 @@ import type { Room } from "../../utils/supabase";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import { CONTINENTS } from "../../continents";
 import { roomVariant, roomGlobePos } from "../../utils/roomVisuals";
+import { ParticleTrail, type ParticleTrailHandle } from "../../components/ParticleTrail";
+
+function cloudDisplayName(room: Room, nicknames: Record<string, string>) {
+  return nicknames[room.code] ?? room.nickname ?? room.code;
+}
 
 const AnimatedPath = AnimatedReanimated.createAnimatedComponent(Path);
 const MAX_VISIBLE_ROOMS = 8;
@@ -84,7 +89,7 @@ const TAB_BAR_HEIGHT = 88;
 const SKY_TOP_OFFSET = 100;
 const SKY_CONTENT_HEIGHT = H - TAB_BAR_HEIGHT;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
-const CLOUD_POS_KEY = "cloud_pos_v1";
+const CLOUD_POS_KEY = "cloud_pos_v2";
 /** Base diameter (px) before scale; `scale: 40` covers the screen from center. */
 const TAP_BLOOM_BASE = 48;
 
@@ -150,6 +155,9 @@ export default function ChatsScreen() {
   const tapBloomOpacity = useRef(new Animated.Value(0)).current;
 
   const canvasContainerRef = useRef<View>(null);
+  const particleRef = useRef<ParticleTrailHandle>(null);
+  const pendingCelebrateRef = useRef<Room | null>(null);
+  const [celebrationRoomId, setCelebrationRoomId] = useState<string | null>(null);
 
   // Unified zoom: 1 = sky, 0.18-0.55 = globe (deeper zoom at lower values), 0.78+ = return to sky
   const zoomLevel = useRef(new Animated.Value(1)).current;
@@ -290,11 +298,11 @@ export default function ChatsScreen() {
   // ─── Data loading ────────────────────────────────────────────────────────────
   async function load() {
     try {
-      const [roomList, nameMap, lastSeenMap] = await Promise.all([
+      const [roomList, lastSeenMap] = await Promise.all([
         fetchMyRoomsCached(),
-        getAllNicknames(),
         getAllLastSeen(),
       ]);
+      const nameMap = await syncLocalNicknamesFromRooms(roomList);
       setRooms(roomList);
       setNicknames(nameMap);
       setLoading(false);
@@ -356,6 +364,32 @@ export default function ChatsScreen() {
       )
       .subscribe((status, err) => {
         if (err) console.error("realtime messages-insert error:", err);
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, [roomIdString]);
+
+  // Shared room title: any member updates `rooms.nickname` → reflect for everyone
+  useEffect(() => {
+    if (!roomIdString) return;
+    const filter = `id=in.(${roomIdString})`;
+    const channel = supabase
+      .channel("rooms-nickname")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "rooms", filter },
+        (payload: { new: Room }) => {
+          const row = payload.new;
+          if (!row?.id || !row.code) return;
+          const name = row.nickname?.trim();
+          if (!name) return;
+          setRooms((prev) => prev.map((r) => (r.id === row.id ? { ...r, nickname: row.nickname } : r)));
+          setNicknames((prev) => ({ ...prev, [row.code]: name }));
+          void persistLocalRoomNickname(row.code, name);
+          invalidateRoomCache();
+        }
+      )
+      .subscribe((status, err) => {
+        if (err) console.error("realtime rooms-nickname error:", err);
       });
     return () => { supabase.removeChannel(channel); };
   }, [roomIdString]);
@@ -504,10 +538,12 @@ export default function ChatsScreen() {
 
         const attempt: { x: number; y: number }[] = [];
 
+        const totalGridW = cols * cw + (cols - 1) * PAD;
+        const gridStartX = Math.max(minX, (W - totalGridW) / 2);
         displayRooms.forEach((_, n) => {
           const col = n % cols;
           const row = Math.floor(n / cols);
-          const x = Math.max(minX, Math.min(maxX, col * cellW));
+          const x = Math.max(minX, Math.min(maxX, gridStartX + col * cellW));
           const y = Math.max(minY, Math.min(maxY, minY + row * cellH));
           attempt.push({ x, y });
         });
@@ -728,8 +764,8 @@ export default function ChatsScreen() {
           router.push({
             pathname: "/room/[code]",
             params: unread
-              ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" }
-              : { code: room.code, name: nicknames[room.code] ?? "" },
+              ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) }
+              : { code: room.code, name: cloudDisplayName(room, nicknames) },
           });
           if (unread) markRoomReadAfterNav(room.code);
         }
@@ -843,6 +879,57 @@ export default function ChatsScreen() {
     return pr;
   }
 
+  const scheduleCloudCelebration = useCallback((room: Room) => {
+    setCelebrationRoomId(room.id);
+    setTimeout(() => {
+      setCelebrationRoomId((id) => (id === room.id ? null : id));
+    }, 2400);
+
+    const tryBurst = (attempt: number) => {
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          const ref = cloudRefsRef.current[room.id];
+          const scale = cloudScalesRef.current[room.id];
+          if (ref?.current && scale) {
+            ref.current.measureInWindow((mx, my, mw, mh) => {
+              if (mw > 0 && mh > 0) {
+                particleRef.current?.spawnAt(mx + mw / 2, my + mh / 2, colors.amber);
+                scale.setValue(1);
+                Animated.sequence([
+                  Animated.spring(scale, {
+                    toValue: 1.12,
+                    tension: 200,
+                    friction: 7,
+                    useNativeDriver: true,
+                  }),
+                  Animated.spring(scale, {
+                    toValue: 1,
+                    tension: 120,
+                    friction: 8,
+                    useNativeDriver: true,
+                  }),
+                ]).start();
+              } else if (attempt < 12) {
+                setTimeout(() => tryBurst(attempt + 1), 120);
+              }
+            });
+          } else if (attempt < 12) {
+            setTimeout(() => tryBurst(attempt + 1), 120);
+          }
+        });
+      });
+    };
+    tryBurst(0);
+  }, []);
+
+  useEffect(() => {
+    if (showAddRoom) return;
+    const r = pendingCelebrateRef.current;
+    if (!r) return;
+    pendingCelebrateRef.current = null;
+    scheduleCloudCelebration(r);
+  }, [showAddRoom, scheduleCloudCelebration]);
+
   // ─── Room creation / joining ─────────────────────────────────────────────────
   async function handleJoinRoom() {
     if (joinCode.trim().length < 6) { setAddError("Enter a 6-character room code."); return; }
@@ -856,6 +943,7 @@ export default function ChatsScreen() {
       setNicknames(nameMap);
       setJoinCode("");
       setShowAddRoom(false);
+      scheduleCloudCelebration(room);
     } catch (e: any) {
       setAddError(e.message ?? "Something went wrong.");
     } finally {
@@ -872,6 +960,7 @@ export default function ChatsScreen() {
       const nameMap = await getAllNicknames();
       setRooms((prev) => [room, ...prev]);
       setNicknames(nameMap);
+      pendingCelebrateRef.current = room;
       setNewlyCreatedCode(room.code);
     } catch (e: any) {
       setAddError(e.message ?? "Something went wrong.");
@@ -908,7 +997,7 @@ export default function ChatsScreen() {
             // Fallback: measureInWindow returned zeros — plain push
             router.push({
               pathname: "/room/[code]",
-              params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
+              params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
             });
             if (unread) markRoomReadAfterNav(room.code);
             return;
@@ -922,7 +1011,7 @@ export default function ChatsScreen() {
         // No ref — fallback to plain push
         router.push({
           pathname: "/room/[code]",
-          params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
+          params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
         });
         if (unread) markRoomReadAfterNav(room.code);
       }
@@ -1005,8 +1094,19 @@ export default function ChatsScreen() {
 
   async function saveRename() {
     if (!renaming) return;
-    await setRoomNickname(renaming.code, renameInput);
-    setNicknames((prev) => ({ ...prev, [renaming.code]: renameInput.trim() }));
+    const name = renameInput.trim();
+    if (!name) {
+      setRenaming(null);
+      return;
+    }
+    try {
+      await syncSharedRoomNickname(renaming.code, name);
+      setNicknames((prev) => ({ ...prev, [renaming.code]: name }));
+      setRooms((prev) => prev.map((r) => (r.code === renaming.code ? { ...r, nickname: name } : r)));
+    } catch (e) {
+      console.error(e);
+      Alert.alert("Could not save", "Please try again.");
+    }
     setRenaming(null);
   }
 
@@ -1036,7 +1136,7 @@ export default function ChatsScreen() {
           { zIndex: -1, backgroundColor: screenBgColor },
         ]}
       />
-    <View style={{ flex: 1 }}>
+    <ParticleTrail ref={particleRef} style={{ flex: 1 }} disabled>
 
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         {/* Scene — full area (behind header), position absolute */}
@@ -1115,9 +1215,9 @@ export default function ChatsScreen() {
                       }}>
                         <SkyCloud
                           ref={cloudRefsRef.current[room.id]}
-                          name={nicknames[room.code] ?? room.code}
+                          name={cloudDisplayName(room, nicknames)}
                           width={cw}
-                          unread={unreadRooms.has(room.code)}
+                          unread={unreadRooms.has(room.code) || celebrationRoomId === room.id}
                           lifted={liftedRoomId === room.id}
                           variant={roomVariant(room.code)}
                           hideLabel={zoomingRoomId === room.id}
@@ -1145,6 +1245,7 @@ export default function ChatsScreen() {
                   rooms={rooms}
                   nicknames={nicknames}
                   unreadRooms={unreadRooms}
+                  celebrationRoomId={celebrationRoomId}
                   memberAvatars={memberAvatars}
                   onClose={goToSkyWithMode}
                   onEnterRoom={(room) => {
@@ -1163,7 +1264,7 @@ export default function ChatsScreen() {
                     setTimeout(() => {
                       router.push({
                         pathname: "/room/[code]",
-                        params: unread ? { code: room.code, unread: "true", name: nicknames[room.code] ?? "" } : { code: room.code, name: nicknames[room.code] ?? "" },
+                        params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
                       });
                     }, 420);
                   }}
@@ -1300,12 +1401,18 @@ export default function ChatsScreen() {
         )}
         {!loading && rooms.length === 0 && (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 60 }}>
-            <Text style={{ fontSize: 64 }}>⛅</Text>
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
-              Your sky is empty
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-              Create a room and your first cloud will appear here.
+            <View style={{ opacity: 0.95 }}
+              pointerEvents="none"
+            >
+              <SkyCloud
+                name="＋"
+                width={W * 0.54}
+                variant={roomVariant("FIRSTSKY")}
+                unread={false}
+              />
+            </View>
+            <Text style={{ fontSize: 14, color: colors.ash, marginTop: 10, textAlign: "center", lineHeight: 22, fontWeight: "600" }}>
+              your first dusk is waiting.
             </Text>
             <TouchableOpacity
               onPress={() => setShowAddRoom(true)}
@@ -1324,7 +1431,7 @@ export default function ChatsScreen() {
         onRename={(room) => {
           optionsSheetRef.current?.hide();
           setTimeout(() => {
-            setRenameInput(nicknames[room.code] ?? "");
+            setRenameInput(cloudDisplayName(room, nicknames));
             setRenaming(room);
           }, 300);
         }}
@@ -1369,11 +1476,20 @@ export default function ChatsScreen() {
                   <TouchableOpacity
                     onPress={() => {
                       const name = newCloudName.trim();
-                      setRoomNickname(newlyCreatedCode, name);
-                      setNicknames((prev) => ({ ...prev, [newlyCreatedCode]: name }));
-                      setShowAddRoom(false);
-                      setNewlyCreatedCode(null);
-                      setNewCloudName("");
+                      const code = newlyCreatedCode!;
+                      void (async () => {
+                        try {
+                          await syncSharedRoomNickname(code, name);
+                          setNicknames((prev) => ({ ...prev, [code]: name }));
+                          setRooms((prev) => prev.map((r) => (r.code === code ? { ...r, nickname: name } : r)));
+                          setShowAddRoom(false);
+                          setNewlyCreatedCode(null);
+                          setNewCloudName("");
+                        } catch (e) {
+                          console.error(e);
+                          Alert.alert("Could not save", "Please try again.");
+                        }
+                      })();
                     }}
                     activeOpacity={interaction.activeOpacitySubtle}
                     style={{ backgroundColor: colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
@@ -1448,7 +1564,7 @@ export default function ChatsScreen() {
           <View style={{ backgroundColor: colors.cream, borderRadius: 24, padding: 28, width: "100%" }}>
             <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 6 }}>Rename Room</Text>
             <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 20 }}>
-              Give {renaming?.code} a nickname just for you
+              Everyone in this room sees this name on their sky.
             </Text>
             <TextInput
               value={renameInput}
@@ -1479,7 +1595,7 @@ export default function ChatsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </ParticleTrail>
 
       <Animated.View
         pointerEvents="none"
@@ -1533,7 +1649,7 @@ const OptionsSheet = forwardRef<OptionsSheetHandle, {
       >
         <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
           <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 4 }}>
-            {room ? (nicknames[room.code] ?? room.code) : ""}
+            {room ? cloudDisplayName(room, nicknames) : ""}
           </Text>
           <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 2, marginBottom: 24 }}>
             {room?.code}
@@ -1653,6 +1769,7 @@ function GlobeCloudItem({
   cy,
   nicknames,
   unreadRooms,
+  celebrationRoomId,
   memberAvatars,
   onPress,
 }: {
@@ -1667,6 +1784,7 @@ function GlobeCloudItem({
   cy: number;
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
+  celebrationRoomId: string | null;
   memberAvatars: Record<string, Avatar>;
   onPress: () => void;
 }) {
@@ -1700,9 +1818,9 @@ function GlobeCloudItem({
         style={{ flex: 1, minWidth: 1, minHeight: 1 }}
       >
         <SkyCloud
-          name={nicknames[room.code] ?? room.code}
+          name={cloudDisplayName(room, nicknames)}
           width={72}
-          unread={unreadRooms.has(room.code)}
+          unread={unreadRooms.has(room.code) || celebrationRoomId === room.id}
           variant={roomVariant(room.code)}
           avatars={room.members
             .filter((id) => memberAvatars[id])
@@ -1869,6 +1987,7 @@ function GlobeView({
   rooms,
   nicknames,
   unreadRooms,
+  celebrationRoomId,
   memberAvatars,
   onClose,
   onEnterRoom,
@@ -1879,6 +1998,7 @@ function GlobeView({
   rooms: Room[];
   nicknames: Record<string, string>;
   unreadRooms: Set<string>;
+  celebrationRoomId: string | null;
   memberAvatars: Record<string, Avatar>;
   onClose: () => void;
   onEnterRoom: (room: Room) => void;
@@ -2068,6 +2188,7 @@ function GlobeView({
             cy={cy}
             nicknames={nicknames}
             unreadRooms={unreadRooms}
+            celebrationRoomId={celebrationRoomId}
             memberAvatars={memberAvatars}
             onPress={() => {
               onClose();
