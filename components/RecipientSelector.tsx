@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import { Text } from "./Text";
 import { useEffect, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { getLocalRoomCodes } from "../utils/rooms";
 import { getAllNicknames } from "../utils/nicknames";
 import { colors, interaction } from "../utils/theme";
@@ -52,16 +53,30 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
         paddingBottom: 48,
       }}
     >
-      <Text
-        style={{
-          fontSize: 22,
-          fontWeight: "800",
-          color: colors.charcoal,
-          marginBottom: 4,
-        }}
-      >
-        Send to...
-      </Text>
+      {/* Header row: title left, My Map pill right */}
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4 }}>
+        <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal }}>
+          Send to...
+        </Text>
+        <TouchableOpacity
+          onPress={() => setMyMap((p) => !p)}
+          activeOpacity={interaction.activeOpacity}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 20,
+            backgroundColor: myMap ? colors.ember : colors.mist,
+          }}
+        >
+          <Ionicons name={myMap ? "map" : "map-outline"} size={16} color={myMap ? "white" : colors.ash} />
+          <Text style={{ fontSize: 13, fontWeight: "700", color: myMap ? "white" : colors.ash }}>
+            My Map
+          </Text>
+        </TouchableOpacity>
+      </View>
       <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 20 }}>
         {myMap && selected.size === 0
           ? "Save to your map"
@@ -69,50 +84,6 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
           ? `Send to ${selected.size} ${selected.size === 1 ? "room" : "rooms"} + save to map`
           : "Choose which rooms get this sunset"}
       </Text>
-
-      <TouchableOpacity
-        onPress={() => setMyMap((p) => !p)}
-        activeOpacity={interaction.activeOpacity}
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          borderRadius: 14,
-          backgroundColor: myMap ? colors.charcoal : "white",
-          borderWidth: 1.5,
-          borderColor: myMap ? colors.charcoal : colors.mist,
-          marginBottom: 10,
-        }}
-      >
-        <View
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: 12,
-            borderWidth: 2,
-            borderColor: myMap ? colors.cream : colors.ash,
-            backgroundColor: myMap ? colors.ember : "transparent",
-            alignItems: "center",
-            justifyContent: "center",
-            marginRight: 14,
-          }}
-        >
-          {myMap && (
-            <Text style={{ color: "white", fontSize: 11, fontWeight: "900" }}>
-              ✓
-            </Text>
-          )}
-        </View>
-        <Text
-          style={{
-            fontSize: 20,
-            fontWeight: "700",
-            color: myMap ? colors.cream : colors.charcoal,
-          }}
-        >
-          My Map
-        </Text>
-      </TouchableOpacity>
 
       {rooms.length === 0 ? (
         <Text
