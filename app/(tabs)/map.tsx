@@ -37,6 +37,7 @@ import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
 import { colors, interaction, spacing } from "../../utils/theme";
+import Svg, { Circle as SvgCircle, Defs, ClipPath, Image as SvgImage } from "react-native-svg";
 import { CloudCard } from "../../components/CloudCard";
 import { FilteredImage } from "../../components/FilteredImage";
 
@@ -310,13 +311,15 @@ const PIN_SIZE = 48;
 
 /**
  * Android Fabric: RN's Image component never paints into the Marker
- * bitmap snapshot (tested remote, file://, data: URIs + tracksViewChanges
- * + key remounting).  The only reliable path is the Marker's native
- * `image` prop, which goes through Google Maps SDK BitmapDescriptorFactory.
+ * bitmap snapshot.  SVG shapes DO render correctly (proven by clouds).
+ * So we render the photo via react-native-svg's <Image> element
+ * clipped to a circle — the SVG canvas pipeline IS captured.
  *
- * Flow: download → resize to 96px → use local file URI as `image` prop.
+ * Flow: download → resize to 96px → base64 → SVG <Image> + <ClipPath>
  */
 const PIN_THUMB_SIZE = 96;
+const R = PIN_SIZE / 2;
+const BORDER = 3;
 
 function ClusterMapMarker({
   cluster,
@@ -329,11 +332,12 @@ function ClusterMapMarker({
 }) {
   const thumbMsg = useMemo(() => clusterNewestWithPhoto(cluster.messages), [cluster]);
   const remoteUri = thumbMsg?.photo_url || null;
-  const [localThumb, setLocalThumb] = useState<string | null>(null);
+  const [dataUri, setDataUri] = useState<string | null>(null);
+  const [tracking, setTracking] = useState(false);
 
   useEffect(() => {
     if (!remoteUri || !thumbMsg) {
-      setLocalThumb(null);
+      setDataUri(null);
       return;
     }
     let cancelled = false;
@@ -361,7 +365,10 @@ function ClusterMapMarker({
           if (cancelled) return;
           await FileSystem.moveAsync({ from: resized.uri, to: thumbDest });
         }
-        if (!cancelled) setLocalThumb(thumbDest);
+        const b64 = await FileSystem.readAsStringAsync(thumbDest, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        if (!cancelled) setDataUri(`data:image/jpeg;base64,${b64}`);
       } catch (e: any) {
         if (!cancelled) console.warn(`[MapPin] ${cluster.id}: ${e?.message ?? e}`);
       }
@@ -369,45 +376,89 @@ function ClusterMapMarker({
     return () => { cancelled = true; };
   }, [remoteUri, thumbMsg?.id, cluster.id]);
 
-  const hasThumb = Boolean(localThumb);
+  useEffect(() => {
+    if (!dataUri) return;
+    setTracking(true);
+    const t = setTimeout(() => setTracking(false), 1500);
+    return () => clearTimeout(t);
+  }, [dataUri]);
+
+  const clipId = `pin_${cluster.id.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   return (
     <Marker
       coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
-      tracksViewChanges={false}
-      image={hasThumb ? { uri: localThumb! } : undefined}
+      tracksViewChanges={tracking}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onOpen(cluster.messages);
       }}
     >
-      {!hasThumb ? (
-        <View style={{ alignItems: "center" }} collapsable={false}>
+      <View style={{ alignItems: "center" }} collapsable={false}>
+        <Svg width={PIN_SIZE} height={PIN_SIZE} viewBox={`0 0 ${PIN_SIZE} ${PIN_SIZE}`}>
+          <SvgCircle cx={R} cy={R} r={R} fill="white" />
+          {dataUri ? (
+            <>
+              <Defs>
+                <ClipPath id={clipId}>
+                  <SvgCircle cx={R} cy={R} r={R - BORDER} />
+                </ClipPath>
+              </Defs>
+              <SvgImage
+                href={{ uri: dataUri }}
+                x={BORDER}
+                y={BORDER}
+                width={PIN_SIZE - BORDER * 2}
+                height={PIN_SIZE - BORDER * 2}
+                clipPath={`url(#${clipId})`}
+                preserveAspectRatio="xMidYMid slice"
+              />
+            </>
+          ) : (
+            <SvgCircle cx={R} cy={R} r={R - BORDER} fill={colors.mist} />
+          )}
+        </Svg>
+        {!dataUri && (
           <View
-            collapsable={false}
             style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
               width: PIN_SIZE,
               height: PIN_SIZE,
-              borderRadius: PIN_SIZE / 2,
-              borderWidth: 3,
-              borderColor: "white",
-              backgroundColor: colors.mist,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
             <Text style={{ fontSize: 20 }}>🌅</Text>
           </View>
+        )}
+        {cluster.messages.length > 1 && zoomedIn && (
           <View
             style={{
-              width: 0, height: 0,
-              borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
-              borderLeftColor: "transparent", borderRightColor: "transparent",
-              borderTopColor: "white", marginTop: 2,
+              backgroundColor: colors.mist,
+              borderRadius: 10,
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              marginTop: 3,
+              minWidth: 20,
+              alignItems: "center",
             }}
-          />
-        </View>
-      ) : null}
+          >
+            <Text style={{ color: colors.charcoal, fontSize: 11, fontWeight: "800", lineHeight: 14 }}>
+              {cluster.messages.length}
+            </Text>
+          </View>
+        )}
+        <View
+          style={{
+            width: 0, height: 0,
+            borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
+            borderLeftColor: "transparent", borderRightColor: "transparent",
+            borderTopColor: "white", marginTop: 2,
+          }}
+        />
+      </View>
     </Marker>
   );
 }

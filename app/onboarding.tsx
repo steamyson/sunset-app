@@ -254,7 +254,7 @@ function StepProfile({
             style={{ width: circleSize, height: circleSize, borderRadius: circleSize / 2 }}
           />
         ) : (
-          <Text style={styles.photoPlaceholder}>{"(: "}</Text>
+          <Text style={styles.photoPlaceholder}>{":)"}</Text>
         )}
       </View>
 

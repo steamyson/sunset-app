@@ -246,7 +246,7 @@ export default function HomeScreen() {
                 <Text style={{ fontSize: 15, color: colors.ash, marginTop: 28, textAlign: "center", lineHeight: 24 }}>
                   {subline
                     ? "The sky is wide open.\nShare the light while it lasts."
-                    : "The sky is yours to catch.\nDon&apos;t let it slip away."}
+                    : "The sky is yours to catch.\nDon\u2019t let it slip away."}
                 </Text>
               </>
             ) : sunInfo ? (
