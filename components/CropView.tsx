@@ -76,9 +76,11 @@ interface Props {
   onDone: (uri: string) => void;
   onSkip: () => void;
   onBack: () => void;
+  circular?: boolean;
 }
 
-export function CropView({ uri, onDone, onSkip, onBack }: Props) {
+export function CropView({ uri, onDone, onSkip, onBack, circular }: Props) {
+  const circularRef = useRef(!!circular);
   const [workUri, setWorkUri] = useState<string | null>(null);
   const [normalizing, setNormalizing] = useState(true);
 
@@ -118,13 +120,21 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
         layoutRef.current = L;
         setLayoutForRender(L);
         setDisplayH(L.dH);
-        const inset = 0.1;
-        const b: Box = {
-          l: L.ox + L.dispW * inset,
-          t: L.oy + L.dispH * inset,
-          r: L.ox + L.dispW * (1 - inset),
-          b: L.oy + L.dispH * (1 - inset),
-        };
+        let b: Box;
+        if (circularRef.current) {
+          const side = Math.min(L.dispW, L.dispH) * 0.8;
+          const cx = L.ox + L.dispW / 2;
+          const cy = L.oy + L.dispH / 2;
+          b = { l: cx - side / 2, t: cy - side / 2, r: cx + side / 2, b: cy + side / 2 };
+        } else {
+          const inset = 0.1;
+          b = {
+            l: L.ox + L.dispW * inset,
+            t: L.oy + L.dispH * inset,
+            r: L.ox + L.dispW * (1 - inset),
+            b: L.oy + L.dispH * (1 - inset),
+          };
+        }
         boxRef.current = b;
         setBox(b);
         setWorkUri(result.uri);
@@ -162,6 +172,15 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
           else next.r = Math.max(s0.l + MIN, Math.min(xMax, s0.r + gs.dx));
           if (vSide === "t") next.t = Math.min(s0.b - MIN, Math.max(oy, s0.t + gs.dy));
           else next.b = Math.max(s0.t + MIN, Math.min(yMax, s0.b + gs.dy));
+          if (circularRef.current) {
+            const w = next.r - next.l;
+            const h = next.b - next.t;
+            const side = Math.max(MIN, Math.min(w, h, dispW, dispH));
+            if (hSide === "l") next.l = next.r - side;
+            else next.r = next.l + side;
+            if (vSide === "t") next.t = next.b - side;
+            else next.b = next.t + side;
+          }
           return next;
         });
       },
@@ -240,20 +259,32 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
         <Ionicons name="arrow-back" size={22} color="white" />
       </TouchableOpacity>
 
+      {/* Dim overlays — rectangular area outside crop box */}
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width: SW, height: t, backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: b, width: SW, height: Math.max(0, displayH - b), backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: t, width: l, height: cropH, backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: r, top: t, width: Math.max(0, SW - r), height: cropH, backgroundColor: DIM }} />
 
-      <View pointerEvents="none" style={{
-        position: "absolute", left: l, top: t, width: cropW, height: cropH,
-        borderWidth: 1.5, borderColor: "white",
-      }} />
-
-      <View pointerEvents="none" style={{ position: "absolute", left: l + cropW / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
-      <View pointerEvents="none" style={{ position: "absolute", left: l + (cropW * 2) / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
-      <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + cropH / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
-      <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + (cropH * 2) / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
+      {circular ? (
+        <>
+          {/* Corner dims inside the square to create circular window */}
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t, width: cropW / 2, height: cropH / 2, backgroundColor: DIM, borderBottomRightRadius: cropW / 2 }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l + cropW / 2, top: t, width: cropW / 2, height: cropH / 2, backgroundColor: DIM, borderBottomLeftRadius: cropW / 2 }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + cropH / 2, width: cropW / 2, height: cropH / 2, backgroundColor: DIM, borderTopRightRadius: cropW / 2 }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l + cropW / 2, top: t + cropH / 2, width: cropW / 2, height: cropH / 2, backgroundColor: DIM, borderTopLeftRadius: cropW / 2 }} />
+          {/* Circle border guide */}
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t, width: cropW, height: cropH, borderRadius: cropW / 2, borderWidth: 2, borderColor: "white" }} />
+        </>
+      ) : (
+        <>
+          {/* Rectangular crop border + grid */}
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t, width: cropW, height: cropH, borderWidth: 1.5, borderColor: "white" }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l + cropW / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l + (cropW * 2) / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + cropH / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
+          <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + (cropH * 2) / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
+        </>
+      )}
 
       {[
         { panHandlers: tlPan.panHandlers, style: { left: l - HANDLE / 2, top: t - HANDLE / 2 } },

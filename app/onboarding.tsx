@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
-  Image,
-  InteractionManager,
+  Modal,
+  Platform,
   Pressable,
   StyleSheet,
   TouchableOpacity,
@@ -11,12 +12,16 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system/legacy";
-import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { CropView } from "../components/CropView";
 import { Text } from "../components/Text";
 import { SkyCloud } from "../components/SkyCloud";
-import { saveAvatar } from "../utils/avatar";
-import { stripExifReencodeToJpeg } from "../utils/imageUploadPrep";
+import { saveAvatar, syncAvatarToServer } from "../utils/avatar";
+import { getDeviceId } from "../utils/device";
+import {
+  onboardingPhotoLog,
+  persistOnboardingProfilePhoto,
+} from "../utils/onboardingProfilePhoto";
 import { getItem, setItem } from "../utils/storage";
 import { colors, spacing } from "../utils/theme";
 
@@ -24,56 +29,8 @@ const { width: W, height: H } = Dimensions.get("window");
 const BASE_CLOUD_W = W * 0.54;
 const TOTAL_STEPS = 5;
 
-/** SecureStore values are capped at 2048 bytes on Android — picker URIs are often longer. */
-const ONBOARDING_PROFILE_FILE = "onboarding_profile.jpg";
-
-function getImageSize(uri: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
-  });
-}
-
-/**
- * Always re-encode to JPEG under a `.jpg` path. Raw `copyAsync` from the picker can copy HEIC (iOS)
- * or other formats into `onboarding_profile.jpg`, which crashes or fails when `Image` decodes it.
- * Native crop UI (`allowsEditing`) is disabled separately — it is a frequent native crash on Android/iOS.
- */
-async function persistProfilePick(uri: string): Promise<string> {
-  const dest = `${FileSystem.documentDirectory}${ONBOARDING_PROFILE_FILE}`;
-  const existing = await FileSystem.getInfoAsync(dest);
-  if (existing.exists) {
-    await FileSystem.deleteAsync(dest, { idempotent: true });
-  }
-
-  let jpegUri: string;
-  try {
-    const { width: w, height: h } = await getImageSize(uri);
-    const side = Math.min(w, h);
-    const originX = Math.round((w - side) / 2);
-    const originY = Math.round((h - side) / 2);
-    const { uri: out } = await manipulateAsync(
-      uri,
-      [{ crop: { originX, originY, width: side, height: side } }, { resize: { width: 768 } }],
-      { compress: 0.85, format: SaveFormat.JPEG }
-    );
-    jpegUri = out;
-  } catch {
-    jpegUri = await stripExifReencodeToJpeg(uri);
-  }
-
-  await FileSystem.copyAsync({ from: jpegUri, to: dest });
-  return dest;
-}
-
-function scheduleAdvance(onAdvance: () => void) {
-  InteractionManager.runAfterInteractions(() => {
-    setTimeout(onAdvance, 400);
-  });
-}
-
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
 
   // Step transition animation
   const contentOpacity = useRef(new Animated.Value(1)).current;
@@ -136,7 +93,7 @@ export default function OnboardingScreen() {
   function renderStep() {
     switch (step) {
       case 0: return <StepWelcome onAdvance={advance} />;
-      case 1: return <StepProfile photoUri={photoUri} setPhotoUri={setPhotoUri} onAdvance={advance} />;
+      case 1: return <StepProfile onAdvance={advance} />;
       case 2: return <StepClouds onAdvance={advance} />;
       case 3: return <StepGoldenHour onAdvance={advance} />;
       case 4: return <StepReady onComplete={complete} />;
@@ -234,35 +191,100 @@ function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
 
 // ─── Step 1: Profile photo ───────────────────────────────────────────────────
 
-function StepProfile({
-  photoUri,
-  setPhotoUri,
-  onAdvance,
-}: {
-  photoUri: string | null;
-  setPhotoUri: (uri: string) => void;
-  onAdvance: () => void;
-}) {
+function StepProfile({ onAdvance }: { onAdvance: () => void }) {
   const circleSize = W * 0.45;
+  /** Last file we wrote (for replacing on retake). */
+  const lastPersistedPathRef = useRef<string | null>(null);
+  const [faceModalOpen, setFaceModalOpen] = useState(false);
+  const [facePhase, setFacePhase] = useState<"camera" | "crop">("camera");
+  const [cropInputUri, setCropInputUri] = useState<string | null>(null);
+  const [allowRetake, setAllowRetake] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [, requestCamPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+  const capturingRef = useRef(false);
 
+  function closeFaceModal() {
+    setFaceModalOpen(false);
+    setFacePhase("camera");
+    setCropInputUri(null);
+    setAllowRetake(false);
+  }
+
+  useEffect(() => {
+    if (faceModalOpen && facePhase === "camera") setCameraReady(false);
+  }, [faceModalOpen, facePhase]);
+
+  async function applyPickedUri(uri: string, skipCenterSquare: boolean) {
+    try {
+      const stableUri = await persistOnboardingProfilePhoto(uri, {
+        skipCenterSquare,
+        previousStoredPath: lastPersistedPathRef.current,
+      });
+      await setItem("profile_photo_uri", stableUri);
+      const avatar = { type: "photo" as const, uri: stableUri };
+      await saveAvatar(avatar);
+      void getDeviceId()
+        .then(async (id) => {
+          if (!id) return;
+          try {
+            await syncAvatarToServer(id, avatar);
+          } catch {
+            /* profile can retry upload */
+          }
+        })
+        .catch(() => {});
+      lastPersistedPathRef.current = stableUri;
+      onAdvance();
+    } catch (e) {
+      console.warn("applyPickedUri", e);
+    }
+  }
+
+  /** Web: system camera then crop. Native: in-app camera (avoids `launchCameraAsync` crash) then crop. */
   async function pickFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") return;
+    onboardingPhotoLog("takePhotoTap", Platform.OS);
+    if (Platform.OS === "web") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") return;
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: "images",
+        allowsEditing: false,
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      setAllowRetake(false);
+      setCropInputUri(result.assets[0].uri);
+      setFacePhase("crop");
+      setFaceModalOpen(true);
+      return;
+    }
+    const res = await requestCamPermission();
+    if (!res.granted) {
+      onboardingPhotoLog("cameraPermissionDenied");
+      return;
+    }
+    setAllowRetake(true);
+    setFacePhase("camera");
+    setCropInputUri(null);
+    setFaceModalOpen(true);
+  }
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: "images",
-      allowsEditing: false,
-      quality: 0.9,
-    });
-    if (!result.canceled && result.assets[0]) {
-      try {
-        const stableUri = await persistProfilePick(result.assets[0].uri);
-        await setItem("profile_photo_uri", stableUri);
-        setPhotoUri(stableUri);
-        scheduleAdvance(onAdvance);
-      } catch (e) {
-        console.warn("persistProfilePick", e);
+  async function captureFromInAppCamera() {
+    if (!cameraReady || capturingRef.current) return;
+    capturingRef.current = true;
+    onboardingPhotoLog("takePictureAsync:start");
+    try {
+      const result = await cameraRef.current?.takePictureAsync({ quality: 0.9 });
+      if (result?.uri) {
+        setCropInputUri(result.uri);
+        setFacePhase("crop");
       }
+    } catch (e) {
+      console.warn("takePictureAsync", e);
+    } finally {
+      capturingRef.current = false;
+      onboardingPhotoLog("takePictureAsync:end");
     }
   }
 
@@ -275,46 +297,95 @@ function StepProfile({
       allowsEditing: false,
       quality: 0.9,
     });
-    if (!result.canceled && result.assets[0]) {
-      try {
-        const stableUri = await persistProfilePick(result.assets[0].uri);
-        await setItem("profile_photo_uri", stableUri);
-        setPhotoUri(stableUri);
-        scheduleAdvance(onAdvance);
-      } catch (e) {
-        console.warn("persistProfilePick", e);
-      }
-    }
+    if (result.canceled || !result.assets[0]) return;
+    setAllowRetake(false);
+    setCropInputUri(result.assets[0].uri);
+    setFacePhase("crop");
+    setFaceModalOpen(true);
   }
 
   return (
-    <View style={styles.stepPadded}>
-      <Text style={styles.stepPrompt}>put a face to the sky</Text>
+    <>
+      <View style={styles.stepPadded}>
+        <Text style={styles.stepPrompt}>put a face to the sky</Text>
 
-      <View style={[styles.photoCircle, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }]}>
-        {photoUri ? (
-          <Image
-            source={{ uri: photoUri }}
-            resizeMode="cover"
-            style={{ width: circleSize, height: circleSize, borderRadius: circleSize / 2 }}
+        <View style={[styles.photoCircle, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }]}>
+          <Text style={styles.photoPlaceholder}>{":)"}</Text>
+        </View>
+
+        <View style={styles.buttonStack}>
+          <TouchableOpacity style={styles.btnPrimary} onPress={pickFromCamera} activeOpacity={0.8}>
+            <Text style={styles.btnPrimaryText}>take photo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnOutline} onPress={pickFromLibrary} activeOpacity={0.8}>
+            <Text style={styles.btnOutlineText}>choose from library</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onAdvance} activeOpacity={0.7}>
+            <Text style={styles.skipLink}>skip for now</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Modal
+        visible={faceModalOpen}
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (facePhase === "crop" && allowRetake) {
+            setFacePhase("camera");
+            setCropInputUri(null);
+          } else {
+            closeFaceModal();
+          }
+        }}
+      >
+        {facePhase === "crop" && cropInputUri ? (
+          <CropView
+            uri={cropInputUri}
+            circular
+            onDone={(croppedUri) => {
+              void applyPickedUri(croppedUri, true);
+            }}
+            onSkip={() => {
+              const u = cropInputUri;
+              if (u) void applyPickedUri(u, true);
+            }}
+            onBack={() => {
+              if (allowRetake) {
+                setFacePhase("camera");
+                setCropInputUri(null);
+              } else {
+                closeFaceModal();
+              }
+            }}
           />
         ) : (
-          <Text style={styles.photoPlaceholder}>{":)"}</Text>
+          <View style={styles.onboardCamRoot}>
+            <CameraView
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing="front"
+              onCameraReady={() => setCameraReady(true)}
+            />
+            <TouchableOpacity
+              style={styles.onboardCamClose}
+              onPress={closeFaceModal}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.onboardCamCloseText}>✕</Text>
+            </TouchableOpacity>
+            <View style={styles.onboardCamShutterWrap}>
+              <TouchableOpacity
+                onPress={captureFromInAppCamera}
+                disabled={!cameraReady}
+                activeOpacity={0.85}
+                style={[styles.onboardCamShutter, !cameraReady && styles.onboardCamShutterDisabled]}
+              />
+            </View>
+          </View>
         )}
-      </View>
-
-      <View style={styles.buttonStack}>
-        <TouchableOpacity style={styles.btnPrimary} onPress={pickFromCamera} activeOpacity={0.8}>
-          <Text style={styles.btnPrimaryText}>take photo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btnOutline} onPress={pickFromLibrary} activeOpacity={0.8}>
-          <Text style={styles.btnOutlineText}>choose from library</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onAdvance} activeOpacity={0.7}>
-          <Text style={styles.skipLink}>skip for now</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      </Modal>
+    </>
   );
 }
 
@@ -381,9 +452,10 @@ function StepGoldenHour({ onAdvance }: { onAdvance: () => void }) {
 
 // ─── Step 4: Ready ───────────────────────────────────────────────────────────
 
-function StepReady({ onComplete }: { onComplete: () => void }) {
+function StepReady({ onComplete }: { onComplete: () => Promise<void> }) {
   const springScale = useRef(new Animated.Value(0.9)).current;
   const springOpacity = useRef(new Animated.Value(0)).current;
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     Animated.parallel([
@@ -409,8 +481,25 @@ function StepReady({ onComplete }: { onComplete: () => void }) {
       ]}
     >
       <Text style={styles.readyTitle}>your sky is waiting.</Text>
-      <TouchableOpacity style={styles.btnReady} onPress={onComplete} activeOpacity={0.8}>
-        <Text style={styles.btnPrimaryText}>open dusk</Text>
+      <TouchableOpacity
+        style={styles.btnReady}
+        disabled={opening}
+        activeOpacity={0.8}
+        onPress={async () => {
+          if (opening) return;
+          setOpening(true);
+          try {
+            await onComplete();
+          } finally {
+            setOpening(false);
+          }
+        }}
+      >
+        {opening ? (
+          <ActivityIndicator color={colors.pureWhite} />
+        ) : (
+          <Text style={styles.btnPrimaryText}>open dusk</Text>
+        )}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -609,5 +698,44 @@ const styles = StyleSheet.create({
     color: colors.charcoal,
     textAlign: "center",
     lineHeight: 22,
+  },
+
+  onboardCamRoot: {
+    flex: 1,
+    backgroundColor: colors.charcoal,
+  },
+  onboardCamClose: {
+    position: "absolute",
+    top: 56,
+    left: spacing.lg,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  onboardCamCloseText: {
+    color: colors.pureWhite,
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  onboardCamShutterWrap: {
+    position: "absolute",
+    bottom: 56,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  onboardCamShutter: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.pureWhite,
+    borderWidth: 5,
+    borderColor: colors.ember,
+  },
+  onboardCamShutterDisabled: {
+    opacity: 0.45,
   },
 });

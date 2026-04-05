@@ -50,6 +50,7 @@ import {
 import { colors, interaction, spacing } from "../../utils/theme";
 import { CloudCard } from "../../components/CloudCard";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
+import { CropView } from "../../components/CropView";
 
 import type { Room } from "../../utils/supabase";
 
@@ -111,6 +112,7 @@ export default function ProfileScreen() {
   // Avatar
   const [avatar, setAvatar]           = useState<Avatar>(DEFAULT_AVATAR);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [cropUri, setCropUri] = useState<string | null>(null);
 
   // Leave room confirm
   const [leavingRoom, setLeavingRoom] = useState<Room | null>(null);
@@ -214,30 +216,34 @@ export default function ProfileScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
+        allowsEditing: false,
+        quality: 0.9,
       });
       if (result.canceled || !result.assets[0]) return;
-      const uri = await persistPhotoUri(result.assets[0].uri);
-      const newAvatar: Avatar = { type: "photo", uri };
-      await saveAvatar(newAvatar);
-      setAvatar(newAvatar);
       setShowAvatarPicker(false);
-      getDeviceId()
-        .then(async (id) => {
-          if (!id) return;
-          try {
-            await syncAvatarToServer(id, newAvatar);
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : "Sync failed";
-            Alert.alert("Could not upload profile photo", msg);
-          }
-        })
-        .catch(() => {});
+      setCropUri(result.assets[0].uri);
     } catch {
       Alert.alert("Coming soon", "Photo upload will be available in the next app build.");
     }
+  }
+
+  async function handleCropDone(croppedUri: string) {
+    setCropUri(null);
+    const uri = await persistPhotoUri(croppedUri);
+    const newAvatar: Avatar = { type: "photo", uri };
+    await saveAvatar(newAvatar);
+    setAvatar(newAvatar);
+    getDeviceId()
+      .then(async (id) => {
+        if (!id) return;
+        try {
+          await syncAvatarToServer(id, newAvatar);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Sync failed";
+          Alert.alert("Could not upload profile photo", msg);
+        }
+      })
+      .catch(() => {});
   }
 
   async function handleSelectPreset(preset: typeof PRESET_AVATARS[number]) {
@@ -890,6 +896,19 @@ export default function ProfileScreen() {
       </Modal>
 
       </SafeAreaView>
+
+      {/* Circular crop modal for profile photo */}
+      <Modal visible={cropUri !== null} animationType="slide" statusBarTranslucent onRequestClose={() => setCropUri(null)}>
+        {cropUri && (
+          <CropView
+            uri={cropUri}
+            circular
+            onDone={handleCropDone}
+            onSkip={() => { if (cropUri) void handleCropDone(cropUri); }}
+            onBack={() => setCropUri(null)}
+          />
+        )}
+      </Modal>
     </Animated.View>
   );
 }
