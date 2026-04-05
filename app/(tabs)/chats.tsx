@@ -13,6 +13,8 @@ import {
   InteractionManager,
   PanResponder,
   StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import AnimatedReanimated, {
   Easing,
@@ -1447,31 +1449,34 @@ export default function ChatsScreen() {
         animationType="slide"
         onRequestClose={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); setJoinCode(""); setAddError(null); }}
       >
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.4)", justifyContent: "flex-end" }}
-          activeOpacity={1}
-          onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); setJoinCode(""); setAddError(null); }}
-        >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.4)" }}
+            activeOpacity={1}
+            onPress={() => { setShowAddRoom(false); setNewlyCreatedCode(null); setNewCloudName(""); setJoinCode(""); setAddError(null); }}
+          />
           <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
             {newlyCreatedCode ? (
               <>
                 <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
-                <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 16 }}>
-                  <Text style={{ fontSize: 42, fontWeight: "900", color: colors.charcoal, letterSpacing: 10 }}>{newlyCreatedCode}</Text>
-                </View>
                 <TextInput
                   value={newCloudName}
                   onChangeText={setNewCloudName}
-                  placeholder="Name this cloud (optional)"
+                  placeholder="name this cloud"
                   placeholderTextColor={colors.ash}
                   autoCorrect={false}
+                  autoFocus
                   style={{
                     backgroundColor: "white", borderWidth: 2,
                     borderColor: newCloudName.length > 0 ? colors.ember : colors.mist,
-                    borderRadius: 16, paddingHorizontal: 20, paddingVertical: 14,
-                    fontSize: 16, color: colors.charcoal, textAlign: "center", marginBottom: 12,
+                    borderRadius: 16, paddingHorizontal: 20, paddingVertical: 18,
+                    fontSize: 24, color: colors.charcoal, textAlign: "center", marginBottom: 12,
                   }}
                 />
+                <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
+                  <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+                  <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{newlyCreatedCode}</Text>
+                </View>
                 {newCloudName.trim().length > 0 && (
                   <TouchableOpacity
                     onPress={() => {
@@ -1555,7 +1560,7 @@ export default function ChatsScreen() {
               </>
             )}
           </View>
-        </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Rename modal */}
