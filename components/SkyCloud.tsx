@@ -149,12 +149,13 @@ type CloudProps = {
   variant?: number;
   hideLabel?: boolean;
   avatars?: Avatar[];
+  avatarSize?: number;
   /** Sky canvas: tint cloud with gradient clipped to the same silhouette (multi-leave select). */
   leaveSelected?: boolean;
 };
 
 export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
-  { name, width, unread, lifted, variant = 0, hideLabel = false, avatars, leaveSelected = false },
+  { name, width, unread, lifted, variant = 0, hideLabel = false, avatars, avatarSize = CLOUD_AVATAR_SIZE, leaveSelected = false },
   ref
 ) {
   const height = width * ASPECT;
@@ -248,33 +249,36 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
             right: width * 0.08,
             flexDirection: "row-reverse",
           }}>
-            {avatars.slice(0, 3).map((av, i) => (
-              <View
-                key={av.type === "preset" ? av.id : av.uri}
-                style={{
-                  width: CLOUD_AVATAR_SIZE,
-                  height: CLOUD_AVATAR_SIZE,
-                  borderRadius: CLOUD_AVATAR_RADIUS,
-                  backgroundColor: av.type === "preset" ? av.bg : colors.mist,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderWidth: 1.5,
-                  borderColor: "#FFFDF8",
-                  overflow: "hidden",
-                  marginRight: i > 0 ? -CLOUD_AVATAR_OVERLAP : 0,
-                }}
-              >
-                {av.type === "preset" ? (
-                  <Text style={{ fontSize: 15, lineHeight: 20 }}>{av.emoji}</Text>
-                ) : (
-                  <Image
-                    source={{ uri: av.uri }}
-                    style={{ width: CLOUD_AVATAR_SIZE, height: CLOUD_AVATAR_SIZE }}
-                    resizeMode="cover"
-                  />
-                )}
-              </View>
-            ))}
+            {avatars.slice(0, 3).map((av, i) => {
+              const overlap = Math.round(avatarSize * (CLOUD_AVATAR_OVERLAP / CLOUD_AVATAR_SIZE));
+              return (
+                <View
+                  key={av.type === "preset" ? av.id : av.uri}
+                  style={{
+                    width: avatarSize,
+                    height: avatarSize,
+                    borderRadius: avatarSize / 2,
+                    backgroundColor: av.type === "preset" ? av.bg : colors.mist,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderWidth: 1.5,
+                    borderColor: "#FFFDF8",
+                    overflow: "hidden",
+                    marginRight: i > 0 ? -overlap : 0,
+                  }}
+                >
+                  {av.type === "preset" ? (
+                    <Text style={{ fontSize: Math.round(avatarSize * 0.55), lineHeight: avatarSize }}>{av.emoji}</Text>
+                  ) : (
+                    <Image
+                      source={{ uri: av.uri }}
+                      style={{ width: avatarSize, height: avatarSize }}
+                      resizeMode="cover"
+                    />
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
 

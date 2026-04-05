@@ -232,7 +232,7 @@ export default function ChatsScreen() {
 
   const goToSky = useCallback(() => {
     zoomValueRef.current = 1;
-    Animated.timing(zoomLevel, { toValue: 1, duration: 400, easing: RNEasing.inOut(RNEasing.cubic), useNativeDriver: true }).start();
+    Animated.timing(zoomLevel, { toValue: 1, duration: 400, easing: RNEasing.inOut(RNEasing.cubic), useNativeDriver: false }).start();
   }, [zoomLevel]);
 
   const [viewMode, setViewMode] = useState<"sky" | "globe">("sky");
@@ -1829,6 +1829,7 @@ function GlobeCloudItem({
           width={72}
           unread={unreadRooms.has(room.code) || celebrationRoomId === room.id}
           variant={roomVariant(room.code)}
+          avatarSize={16}
           avatars={room.members
             .filter((id) => memberAvatars[id])
             .map((id) => memberAvatars[id])
