@@ -32,6 +32,8 @@ export const colors = {
   globeOcean: "#1a3a5c",
   globeOceanLight: "#2a5f8f",
   globeOceanShadow: "#4A90D9",
+  /** Map “you are here” dot — platform-style blue (not shown via native showsUserLocation on Fabric). */
+  mapLocationDot: "#4285F4",
 };
 
 // Cloud-shaped border radius variants — each corner differs slightly for an organic, puffy feel

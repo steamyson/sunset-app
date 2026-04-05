@@ -308,8 +308,14 @@ const BADGE_DELTA_THRESHOLD = 0.5;
 const PIN_SIZE = 48;
 
 /**
- * Photo markers must keep `tracksViewChanges` true while a thumbnail URI exists.
- * If we flip it false on `onLoad`, the map often snapshots too early (mist only) and never updates again.
+ * Android's MapView renders custom Marker children to a native bitmap.
+ * Remote-URI images load asynchronously, but the bitmap is captured before
+ * the pixels arrive — producing an empty circle.  Even tracksViewChanges
+ * doesn't reliably re-capture after the Image paints on Fabric.
+ *
+ * Fix: download the thumbnail to FileSystem.cacheDirectory, then render with
+ * the local file:// URI (loads synchronously into the bitmap).  A key change
+ * on the Marker forces a fresh bitmap capture once the file is ready.
  */
 function ClusterMapMarker({
   cluster,
@@ -321,67 +327,79 @@ function ClusterMapMarker({
   onOpen: (messages: Message[]) => void;
 }) {
   const thumbMsg = useMemo(() => clusterNewestWithPhoto(cluster.messages), [cluster]);
-  const thumbUri = thumbMsg?.photo_url ? thumbUrl(thumbMsg.photo_url, 96) : null;
+  const remoteUri = thumbMsg?.photo_url || null;
+  const [dataUri, setDataUri] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!thumbUri) return;
-    Image.prefetch(thumbUri).catch(() => {});
-  }, [thumbUri]);
+    if (!remoteUri || !thumbMsg) {
+      setDataUri(null);
+      return;
+    }
+    let cancelled = false;
+    const dest = `${FileSystem.cacheDirectory}map_pin_${thumbMsg.id}.jpg`;
+
+    (async () => {
+      try {
+        const info = await FileSystem.getInfoAsync(dest);
+        if (!info.exists) {
+          const result = await FileSystem.downloadAsync(remoteUri, dest);
+          if (cancelled) return;
+          if (result.status < 200 || result.status >= 300) {
+            await FileSystem.deleteAsync(dest, { idempotent: true });
+            return;
+          }
+        }
+        const b64 = await FileSystem.readAsStringAsync(dest, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        if (!cancelled) setDataUri(`data:image/jpeg;base64,${b64}`);
+      } catch (e: any) {
+        if (!cancelled) console.warn(`[MapPin] ${cluster.id}: ${e?.message ?? e}`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [remoteUri, thumbMsg?.id, cluster.id]);
 
   return (
     <Marker
+      key={dataUri ? `${cluster.id}_img` : cluster.id}
       coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
-      tracksViewChanges={Boolean(thumbUri)}
+      tracksViewChanges={false}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onOpen(cluster.messages);
       }}
     >
       <View style={{ alignItems: "center" }} collapsable={false}>
-        <View
-          style={{
-            position: "relative",
-            width: PIN_SIZE,
-            height: PIN_SIZE,
-            borderRadius: PIN_SIZE / 2,
-            borderWidth: 3,
-            borderColor: "white",
-            overflow: "hidden",
-            backgroundColor: colors.mist,
-            shadowColor: colors.charcoal,
-            shadowOffset: { width: 0, height: 3 },
-            shadowOpacity: 0.3,
-            shadowRadius: 6,
-            elevation: 6,
-          }}
-        >
-          {thumbUri ? (
-            <Image
-              key={thumbUri}
-              source={{ uri: thumbUri }}
-              style={{
-                position: "absolute",
-                width: PIN_SIZE,
-                height: PIN_SIZE,
-                top: 0,
-                left: 0,
-              }}
-              resizeMode="cover"
-              {...(Platform.OS === "android" ? { fadeDuration: 0 } : {})}
-            />
-          ) : (
-            <View
-              style={{
-                width: PIN_SIZE,
-                height: PIN_SIZE,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ fontSize: 20 }}>🌅</Text>
-            </View>
-          )}
-        </View>
+        {dataUri ? (
+          <Image
+            source={{ uri: dataUri }}
+            style={{
+              width: PIN_SIZE,
+              height: PIN_SIZE,
+              borderRadius: PIN_SIZE / 2,
+              borderWidth: 3,
+              borderColor: "white",
+            }}
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            collapsable={false}
+            style={{
+              width: PIN_SIZE,
+              height: PIN_SIZE,
+              borderRadius: PIN_SIZE / 2,
+              borderWidth: 3,
+              borderColor: "white",
+              backgroundColor: colors.mist,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ fontSize: 20 }}>🌅</Text>
+          </View>
+        )}
         {cluster.messages.length > 1 && zoomedIn && (
           <View
             style={{
@@ -392,11 +410,6 @@ function ClusterMapMarker({
               marginTop: 3,
               minWidth: 20,
               alignItems: "center",
-              shadowColor: colors.pureBlack,
-              shadowOffset: { width: 0, height: 1 },
-              shadowOpacity: 0.3,
-              shadowRadius: 2,
-              elevation: 3,
             }}
           >
             <Text style={{ color: "white", fontSize: 11, fontWeight: "800", lineHeight: 14 }}>

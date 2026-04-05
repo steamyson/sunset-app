@@ -10,7 +10,7 @@ jest.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 jest.mock("expo-location", () => ({}));
 jest.mock("expo-file-system/legacy", () => ({}));
 
-import { clusterMessages } from "../clustering";
+import { clusterMessages, clusterNewestWithPhoto } from "../clustering";
 import type { Message } from "../messages";
 
 function mkMsg(overrides: Partial<Message> = {}): Message {
@@ -74,5 +74,27 @@ describe("clusterMessages", () => {
     expect(result[0].id).toBe("first");
     expect(result[0].lat).toBe(40.0);
     expect(result[0].lng).toBe(-74.0);
+  });
+
+  it("orders cluster messages newest first", () => {
+    const older = mkMsg({ id: "older", created_at: "2026-04-01T12:00:00Z" });
+    const newer = mkMsg({ id: "newer", created_at: "2026-04-03T12:00:00Z" });
+    const result = clusterMessages([older, newer]);
+    expect(result[0].messages.map((m) => m.id)).toEqual(["newer", "older"]);
+  });
+
+  it("clusterNewestWithPhoto skips newer rows without a photo", () => {
+    const noPhoto = mkMsg({
+      id: "new",
+      created_at: "2026-04-03T12:00:00Z",
+      photo_url: "",
+    });
+    const withPhoto = mkMsg({
+      id: "old",
+      created_at: "2026-04-02T12:00:00Z",
+      photo_url: "https://example.com/p.jpg",
+    });
+    const msgs = clusterMessages([noPhoto, withPhoto])[0].messages;
+    expect(clusterNewestWithPhoto(msgs)?.id).toBe("old");
   });
 });
