@@ -218,6 +218,7 @@ function NativeMap({ messages, myCoords }: {
 }) {
   const [selected, setSelected] = useState<Message[] | null>(null);
   const [zoomedIn, setZoomedIn] = useState(false);
+  const [satellite, setSatellite] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<any>(null);
   const hasAutoFitRef = useRef(false);
@@ -271,6 +272,26 @@ function NativeMap({ messages, myCoords }: {
     }, 600);
   }
 
+  function toggleSatellite() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSatellite((s) => !s);
+  }
+
+  const mapFabStyle = {
+    position: "absolute" as const,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    shadowColor: colors.pureBlack,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  };
+
   return (
     <View style={{ flex: 1 }}>
       <MapView
@@ -279,7 +300,10 @@ function NativeMap({ messages, myCoords }: {
         provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
         initialRegion={USA_REGION}
         onMapReady={() => setMapReady(true)}
-        customMapStyle={Platform.OS === "android" && PROVIDER_GOOGLE ? mapStyle : []}
+        mapType={satellite ? "satellite" : "standard"}
+        customMapStyle={
+          Platform.OS === "android" && PROVIDER_GOOGLE && !satellite ? mapStyle : []
+        }
         showsUserLocation
         showsMyLocationButton={false}
         showsCompass={false}
@@ -349,16 +373,31 @@ function NativeMap({ messages, myCoords }: {
 
       {selected && <PinModal messages={selected} onClose={() => setSelected(null)} />}
 
+      {/* Satellite / roadmap — above locate */}
+      <TouchableOpacity
+        onPress={toggleSatellite}
+        accessibilityLabel={satellite ? "Show map" : "Show satellite"}
+        style={{
+          ...mapFabStyle,
+          bottom: 80,
+          backgroundColor: satellite ? colors.charcoal : colors.cream,
+        }}
+      >
+        <Ionicons
+          name={satellite ? "map-outline" : "globe-outline"}
+          size={22}
+          color={satellite ? colors.cream : colors.ember}
+        />
+      </TouchableOpacity>
+
       {/* Custom locate-me button — bottom right, above tab bar */}
       <TouchableOpacity
         onPress={goToMyLocation}
+        accessibilityLabel="My location"
         style={{
-          position: "absolute", bottom: 28, right: 20,
-          width: 44, height: 44, borderRadius: 22,
+          ...mapFabStyle,
+          bottom: 28,
           backgroundColor: colors.cream,
-          alignItems: "center", justifyContent: "center",
-          shadowColor: colors.pureBlack, shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
         }}
       >
         <Ionicons name="locate" size={22} color={colors.ember} />

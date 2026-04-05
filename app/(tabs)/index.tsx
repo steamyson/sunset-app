@@ -11,9 +11,10 @@ import {
   Easing,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
 const { width: W, height: H } = Dimensions.get("window");
 import { useFocusEffect } from "expo-router";
@@ -25,7 +26,12 @@ import {
   type Message,
 } from "../../utils/messages";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
-import { fetchSunsetTime, nextGoldenHourWindow, type SunsetInfo } from "../../utils/sunset";
+import {
+  fetchSunsetTime,
+  nextGoldenHourWindow,
+  formatSunsetTime,
+  type SunsetInfo,
+} from "../../utils/sunset";
 import Svg, { Circle } from "react-native-svg";
 import { getNicknames } from "../../utils/identity";
 import { getDeviceId } from "../../utils/device";
@@ -259,7 +265,7 @@ export default function FeedScreen() {
                       ...cloudShape(2),
                       flexDirection: "row", alignItems: "center", gap: 6,
                     }}>
-                      <Text style={{ fontSize: 14 }}>🌇</Text>
+                      <Ionicons name="partly-sunny-outline" size={18} color={colors.ember} />
                       <Text style={{ fontSize: 13, fontWeight: "600", color: colors.charcoal }}>
                         {sunsetLabel}
                       </Text>
@@ -288,7 +294,9 @@ export default function FeedScreen() {
                   </TouchableOpacity>
                 </View>
               )}
-              {!loading && !loadError && messages.length === 0 && <FeedEmptyState />}
+              {!loading && !loadError && messages.length === 0 && (
+                <FeedEmptyState sunsetInfo={sunsetInfo} />
+              )}
             </View>
           }
           ListFooterComponent={
@@ -324,15 +332,101 @@ export default function FeedScreen() {
   );
 }
 
+const EMPTY_FEED_SUBTITLES = [
+  "When the next window opens, use the orange camera button below and share with your rooms.",
+  "Nothing here yet — the sky is still gathering light. The camera button below is your way in.",
+  "Your rooms are ready. Catch the next golden hour and send the first photo from the tab bar camera.",
+  "Golden hour photos from your clouds will land here. The big orange button below opens the camera.",
+];
+
+/** Deterministic line per local calendar day (stable within a day, shifts daily). */
+function emptyFeedSubtitleForToday(): string {
+  const d = new Date();
+  const key = d.getFullYear() * 400 + d.getMonth() * 31 + d.getDate();
+  return EMPTY_FEED_SUBTITLES[key % EMPTY_FEED_SUBTITLES.length]!;
+}
+
+const FEED_TIMING_QUOTES = [
+  "Perfect way to capture the gold of the day.",
+  "Catch your breath in the last moments of sunshine.",
+  "See yourself in a new light.",
+  "The gold of your soul never gets old.",
+  "Glitter and shine like the rays of the sun.",
+  "When the sun is almost done, things get fun.",
+  "The best pictures capture the gold of the day.",
+  "The gold never gets old.",
+  "This just shows that nothing perfect lasts forever.",
+  "A magical world comes to life in the golden hour of the sky.",
+  "For one short moment, the sky comes to life.",
+  "Beauty and grace in one space.",
+  "You shimmer and shine in golden sunshine.",
+  "The golden hour is a sight to behold.",
+  "It's like a wizard lit up the sky.",
+  "Calm and grace that shines in your face.",
+  "That moment the sky is calling your name.",
+  "Even the sky is an attention seeker.",
+  "Sunlight is dripping on the day like musical notes in the sky.",
+  "The most beautiful shades of the earth are found in the golden hour.",
+  "Picture perfect in the best golden sunlight.",
+  "Everyone shimmers and shines when they find the golden hour.",
+  "Even the drabbest of scenes light up in the golden hour.",
+  "Stop, breathe, and click for breathtaking beauty.",
+  "Don't just lose yourself behind the camera. Lose yourself in the moment of the golden hour.",
+  "To make a scene come to life, capture it in the golden hour.",
+  "Flawless skin is found in the golden hour.",
+  "That moment when you shine like gold.",
+  "Make tomorrow jealous with a beautiful golden hour pic.",
+  "Bring my face to life with glitter and gold.",
+  "You never look old when you are surrounded by gold.",
+  "Your golden soul shows right through your selfie.",
+  "Negativity is washed away in the golden hour.",
+  "Following the sun where it meets the horizon.",
+  "Capture the beauty lost in a blink.",
+  "Happiness lives on the edge of the world.",
+  "Let the sunlight paint you with glitter and gold.",
+  "In the sun's rays, we find our best days.",
+  "Genuine happiness is found in the golden hour.",
+] as const;
+
+function emptyFeedTimingHint(sunsetInfo: SunsetInfo | null): string | null {
+  if (!sunsetInfo) return null;
+  const w = nextGoldenHourWindow(sunsetInfo);
+  const now = Date.now();
+  const start = w.startsAt.getTime();
+  const end = w.endsAt.getTime();
+  if (now >= start && now <= end) {
+    return `${w.label === "sunrise" ? "Sunrise" : "Sunset"} window is open now.`;
+  }
+  if (now < start) {
+    const label = w.label === "sunrise" ? "Sunrise" : "Sunset";
+    return `Next: ${label} at ${formatSunsetTime(w.startsAt)}.`;
+  }
+  return null;
+}
+
+function randomFeedTimingQuote(): string {
+  const i = Math.floor(Math.random() * FEED_TIMING_QUOTES.length);
+  return FEED_TIMING_QUOTES[i]!;
+}
+
+function feedQuoteWithMarks(body: string): string {
+  return `\u201C${body}\u201D`;
+}
+
 /** Global feed (tab) — empty state with spring-in, float, and soft halo (matches in-room empty polish). */
-function FeedEmptyState() {
+function FeedEmptyState({ sunsetInfo }: { sunsetInfo: SunsetInfo | null }) {
   const containerOpacity = useRef(new Animated.Value(0)).current;
-  const emojiFloat = useRef(new Animated.Value(0)).current;
-  const emojiScale = useRef(new Animated.Value(0.86)).current;
+  const iconFloat = useRef(new Animated.Value(0)).current;
+  const iconScale = useRef(new Animated.Value(0.86)).current;
+  const titleScale = useRef(new Animated.Value(0.94)).current;
   const haloScale = useRef(new Animated.Value(1)).current;
   const haloOpacity = useRef(new Animated.Value(0.18)).current;
+  const subtitle = emptyFeedSubtitleForToday();
+  const timingHint = emptyFeedTimingHint(sunsetInfo);
+  const timingQuote = useMemo(() => randomFeedTimingQuote(), []);
 
   useEffect(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     Animated.parallel([
       Animated.timing(containerOpacity, {
         toValue: 1,
@@ -340,23 +434,29 @@ function FeedEmptyState() {
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
-      Animated.spring(emojiScale, {
+      Animated.spring(iconScale, {
         toValue: 1,
         tension: 120,
         friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.spring(titleScale, {
+        toValue: 1,
+        tension: 140,
+        friction: 9,
         useNativeDriver: true,
       }),
     ]).start();
 
     const floatLoop = Animated.loop(
       Animated.sequence([
-        Animated.timing(emojiFloat, {
+        Animated.timing(iconFloat, {
           toValue: -10,
           duration: 2400,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(emojiFloat, {
+        Animated.timing(iconFloat, {
           toValue: 0,
           duration: 2400,
           easing: Easing.inOut(Easing.sin),
@@ -368,14 +468,14 @@ function FeedEmptyState() {
       Animated.sequence([
         Animated.parallel([
           Animated.timing(haloScale, {
-            toValue: 1.14,
-            duration: 2800,
+            toValue: 1.18,
+            duration: 2600,
             easing: Easing.inOut(Easing.quad),
             useNativeDriver: true,
           }),
           Animated.timing(haloOpacity, {
-            toValue: 0.38,
-            duration: 2800,
+            toValue: 0.4,
+            duration: 2600,
             easing: Easing.inOut(Easing.quad),
             useNativeDriver: true,
           }),
@@ -383,13 +483,13 @@ function FeedEmptyState() {
         Animated.parallel([
           Animated.timing(haloScale, {
             toValue: 1,
-            duration: 2800,
+            duration: 2600,
             easing: Easing.inOut(Easing.quad),
             useNativeDriver: true,
           }),
           Animated.timing(haloOpacity, {
-            toValue: 0.14,
-            duration: 2800,
+            toValue: 0.12,
+            duration: 2600,
             easing: Easing.inOut(Easing.quad),
             useNativeDriver: true,
           }),
@@ -402,33 +502,66 @@ function FeedEmptyState() {
       floatLoop.stop();
       haloLoop.stop();
     };
-  }, [containerOpacity, emojiFloat, emojiScale, haloOpacity, haloScale]);
+  }, [containerOpacity, iconFloat, iconScale, titleScale, haloOpacity, haloScale]);
 
   return (
     <Animated.View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32, opacity: containerOpacity }}>
-      <View style={{ alignItems: "center", justifyContent: "center", height: 88, marginBottom: 4 }}>
+      <View style={{ alignItems: "center", justifyContent: "center", height: 96, marginBottom: 4 }}>
         <Animated.View
           pointerEvents="none"
           style={{
             position: "absolute",
-            width: 96,
-            height: 96,
-            borderRadius: 48,
+            width: 104,
+            height: 104,
+            borderRadius: 52,
             backgroundColor: colors.amber,
             opacity: haloOpacity,
             transform: [{ scale: haloScale }],
           }}
         />
-        <Animated.View style={{ transform: [{ translateY: emojiFloat }, { scale: emojiScale }] }}>
-          <Text style={{ fontSize: 64 }}>🌅</Text>
+        <Animated.View style={{ transform: [{ translateY: iconFloat }, { scale: iconScale }] }}>
+          <Ionicons name="sunny" size={56} color={colors.ember} />
         </Animated.View>
       </View>
-      <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
-        Your feed awaits
-      </Text>
-      <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-        Tap the 📷 button during golden hour and share it with your rooms.
-      </Text>
+      <Animated.View style={{ transform: [{ scale: titleScale }] }}>
+        <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
+          Your feed awaits
+        </Text>
+      </Animated.View>
+      {timingHint ? (
+        <>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: colors.ember,
+              marginTop: 10,
+              textAlign: "center",
+              lineHeight: 20,
+            }}
+          >
+            {timingHint}
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "400",
+              fontStyle: "italic",
+              color: colors.ash,
+              marginTop: 8,
+              textAlign: "center",
+              lineHeight: 20,
+            }}
+          >
+            {feedQuoteWithMarks(timingQuote)}
+          </Text>
+        </>
+      ) : null}
+      {!timingHint ? (
+        <Text style={{ fontSize: 14, color: colors.ash, marginTop: 10, textAlign: "center", lineHeight: 22 }}>
+          {subtitle}
+        </Text>
+      ) : null}
     </Animated.View>
   );
 }
