@@ -221,7 +221,7 @@ export default function FeedScreen() {
         sunHighlightOffsetY={100}
       />
 
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
         <FlatList
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}

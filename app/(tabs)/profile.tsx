@@ -383,7 +383,7 @@ export default function ProfileScreen() {
         sunHighlightOffsetY={100}
       />
 
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1, paddingHorizontal: spacing.lg }} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
