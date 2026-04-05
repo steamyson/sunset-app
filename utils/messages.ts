@@ -302,7 +302,7 @@ export async function fetchMessagesWithLocation(opts: {
     query = query.eq("sender_device_id", opts.deviceId);
   } else {
     if (!opts.roomIds.length) return [];
-    query = query.in("room_id", opts.roomIds);
+    query = query.in("room_id", opts.roomIds).neq("sender_device_id", opts.deviceId);
   }
 
   const { data, error } = await query;

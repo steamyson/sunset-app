@@ -3,7 +3,7 @@ import {
   Animated,
   Dimensions,
   Image,
-  Platform,
+  InteractionManager,
   Pressable,
   StyleSheet,
   TouchableOpacity,
@@ -12,9 +12,12 @@ import {
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { Text } from "../components/Text";
 import { SkyCloud } from "../components/SkyCloud";
-import { setItem } from "../utils/storage";
+import { saveAvatar } from "../utils/avatar";
+import { stripExifReencodeToJpeg } from "../utils/imageUploadPrep";
+import { getItem, setItem } from "../utils/storage";
 import { colors, spacing } from "../utils/theme";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -24,14 +27,48 @@ const TOTAL_STEPS = 5;
 /** SecureStore values are capped at 2048 bytes on Android — picker URIs are often longer. */
 const ONBOARDING_PROFILE_FILE = "onboarding_profile.jpg";
 
+function getImageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+  });
+}
+
+/**
+ * Always re-encode to JPEG under a `.jpg` path. Raw `copyAsync` from the picker can copy HEIC (iOS)
+ * or other formats into `onboarding_profile.jpg`, which crashes or fails when `Image` decodes it.
+ * Native crop UI (`allowsEditing`) is disabled separately — it is a frequent native crash on Android/iOS.
+ */
 async function persistProfilePick(uri: string): Promise<string> {
   const dest = `${FileSystem.documentDirectory}${ONBOARDING_PROFILE_FILE}`;
   const existing = await FileSystem.getInfoAsync(dest);
   if (existing.exists) {
     await FileSystem.deleteAsync(dest, { idempotent: true });
   }
-  await FileSystem.copyAsync({ from: uri, to: dest });
+
+  let jpegUri: string;
+  try {
+    const { width: w, height: h } = await getImageSize(uri);
+    const side = Math.min(w, h);
+    const originX = Math.round((w - side) / 2);
+    const originY = Math.round((h - side) / 2);
+    const { uri: out } = await manipulateAsync(
+      uri,
+      [{ crop: { originX, originY, width: side, height: side } }, { resize: { width: 768 } }],
+      { compress: 0.85, format: SaveFormat.JPEG }
+    );
+    jpegUri = out;
+  } catch {
+    jpegUri = await stripExifReencodeToJpeg(uri);
+  }
+
+  await FileSystem.copyAsync({ from: jpegUri, to: dest });
   return dest;
+}
+
+function scheduleAdvance(onAdvance: () => void) {
+  InteractionManager.runAfterInteractions(() => {
+    setTimeout(onAdvance, 400);
+  });
 }
 
 export default function OnboardingScreen() {
@@ -83,6 +120,10 @@ export default function OnboardingScreen() {
   }
 
   async function complete() {
+    const photoUriStored = await getItem("profile_photo_uri");
+    if (photoUriStored) {
+      await saveAvatar({ type: "photo", uri: photoUriStored });
+    }
     await setItem("onboarding_complete", "true");
     router.replace("/home");
   }
@@ -205,19 +246,20 @@ function StepProfile({
   const circleSize = W * 0.45;
 
   async function pickFromCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") return;
+
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: "images" as const,
-      // Android crop activity after capture is a frequent native crash; iOS editor is stable.
-      allowsEditing: Platform.OS === "ios",
-      aspect: [1, 1] as [number, number],
-      quality: 0.8,
+      mediaTypes: "images",
+      allowsEditing: false,
+      quality: 0.9,
     });
     if (!result.canceled && result.assets[0]) {
       try {
         const stableUri = await persistProfilePick(result.assets[0].uri);
         await setItem("profile_photo_uri", stableUri);
         setPhotoUri(stableUri);
-        setTimeout(onAdvance, 600);
+        scheduleAdvance(onAdvance);
       } catch (e) {
         console.warn("persistProfilePick", e);
       }
@@ -225,18 +267,20 @@ function StepProfile({
   }
 
   async function pickFromLibrary() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") return;
+
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images" as const,
-      allowsEditing: Platform.OS === "ios",
-      aspect: [1, 1] as [number, number],
-      quality: 0.8,
+      mediaTypes: "images",
+      allowsEditing: false,
+      quality: 0.9,
     });
     if (!result.canceled && result.assets[0]) {
       try {
         const stableUri = await persistProfilePick(result.assets[0].uri);
         await setItem("profile_photo_uri", stableUri);
         setPhotoUri(stableUri);
-        setTimeout(onAdvance, 600);
+        scheduleAdvance(onAdvance);
       } catch (e) {
         console.warn("persistProfilePick", e);
       }
@@ -251,6 +295,7 @@ function StepProfile({
         {photoUri ? (
           <Image
             source={{ uri: photoUri }}
+            resizeMode="cover"
             style={{ width: circleSize, height: circleSize, borderRadius: circleSize / 2 }}
           />
         ) : (
