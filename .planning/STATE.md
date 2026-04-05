@@ -90,9 +90,10 @@ None yet.
 | 260404-nqz | Whimsy UI 1: emoji mount spring and submit bloom animations on setup screen | 2026-04-04 | b1af826 | [260404-nqz-whimsy-ui-1](./quick/260404-nqz-whimsy-ui-1-animate-setup-screen-sunrise/) |
 | 260404-nu2 | Whimsy UI 2: CloudCard staggered spring-in entry animation (scale 0.88->1, opacity 0->1, delay seed*60ms) | 2026-04-04 | d4d2f30 | [260404-nu2-cloudcard-spring](./quick/260404-nu2-whimsy-ui-2-cloudcard-staggered-spring-i/) |
 | 260405-0ri | New user onboarding flow: 5-step sequence (welcome, profile photo, clouds, golden hour, ready) with SecureStore gate in layout | 2026-04-05 | 4c731f8 | [260405-0ri-onboarding](./quick/260405-0ri-new-user-onboarding-flow-5-step-sequence/) |
+| 260405-1op | Two chats.tsx fixes: center fresh cloud layout (gridStartX offset + CLOUD_POS_KEY v2); room creation popup name input promoted to top/large with KeyboardAvoidingView | 2026-04-05 | 891fd0f | [260405-1op-fixes](./quick/260405-1op-two-chats-tsx-fixes-center-clouds-horizo/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-05 - Completed quick task 260405-0ri: New user onboarding flow — 5-step sequence
-Stopped at: Completed quick-260405-1op: two chats.tsx fixes
+Last activity: 2026-04-05 - Completed quick task 260405-1op: two chats.tsx fixes (cloud centering + popup redesign)
+Stopped at: Phase 02 complete. Quick tasks in progress.
 Resume file: None
