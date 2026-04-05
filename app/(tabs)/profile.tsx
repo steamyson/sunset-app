@@ -12,6 +12,8 @@ import {
   Image,
   Animated,
   Easing,
+  KeyboardAvoidingView,
+  Share,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
@@ -35,7 +37,7 @@ import type { User } from "@supabase/supabase-js";
 import { getDeviceId } from "../../utils/device";
 import { fetchSunsetTime, type SunsetInfo } from "../../utils/sunset";
 import { getLocalNickname, setLocalNickname, syncDeviceToSupabase, MAX_NICKNAME_LENGTH } from "../../utils/identity";
-import { leaveRoom, createRoom } from "../../utils/rooms";
+import { leaveRoom, createRoom, syncSharedRoomNickname } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
 import { syncLocalNicknamesFromRooms } from "../../utils/nicknames";
 import {
@@ -97,6 +99,8 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [togglingAlert, setTogglingAlert] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
+  const [newlyCreatedCode, setNewlyCreatedCode] = useState<string | null>(null);
+  const [newCloudName, setNewCloudName] = useState("");
   const [streak, setStreak] = useState(0);
 
   // Edit nickname modal
@@ -258,14 +262,21 @@ export default function ProfileScreen() {
     setCreatingRoom(true);
     try {
       const room = await createRoom();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setRooms((prev) => [room, ...prev]);
       const nickMap = await syncLocalNicknamesFromRooms([room]);
       setRoomNicknames(nickMap);
+      setNewlyCreatedCode(room.code);
     } catch (e) {
       console.error(e);
     } finally {
       setCreatingRoom(false);
     }
+  }
+
+  function dismissCreatedModal() {
+    setNewlyCreatedCode(null);
+    setNewCloudName("");
   }
 
   async function handleGoogleSignIn() {
@@ -393,7 +404,13 @@ export default function ProfileScreen() {
                 borderWidth: 2, borderColor: colors.ember,
               }}>
                 {avatar.type === "photo"
-                  ? <Image source={{ uri: avatar.uri }} style={{ width: 64, height: 64 }} />
+                  ? (
+                    <Image
+                      source={{ uri: avatar.uri }}
+                      resizeMode="cover"
+                      style={{ width: 64, height: 64 }}
+                    />
+                  )
                   : <Text style={{ fontSize: 28 }}>{avatar.emoji}</Text>
                 }
               </View>
@@ -778,6 +795,73 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* Leave room confirm modal */}
+      {/* Room created modal — name + code */}
+      <Modal visible={newlyCreatedCode !== null} transparent animationType="slide" onRequestClose={dismissCreatedModal}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.4)" }}
+            activeOpacity={1}
+            onPress={dismissCreatedModal}
+          />
+          <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
+            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
+            <TextInput
+              value={newCloudName}
+              onChangeText={setNewCloudName}
+              placeholder="name this cloud"
+              placeholderTextColor={colors.ash}
+              autoCorrect={false}
+              autoFocus
+              style={{
+                backgroundColor: "white", borderWidth: 2,
+                borderColor: newCloudName.length > 0 ? colors.ember : colors.mist,
+                borderRadius: 16, paddingHorizontal: 20, paddingVertical: 18,
+                fontSize: 24, color: colors.charcoal, textAlign: "center", marginBottom: 12,
+              }}
+            />
+            <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+              <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{newlyCreatedCode}</Text>
+            </View>
+            {newCloudName.trim().length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  const name = newCloudName.trim();
+                  const code = newlyCreatedCode!;
+                  void (async () => {
+                    try {
+                      await syncSharedRoomNickname(code, name);
+                      setRoomNicknames((prev) => ({ ...prev, [code]: name }));
+                      setRooms((prev) => prev.map((r) => r.code === code ? { ...r, nickname: name } : r));
+                      dismissCreatedModal();
+                    } catch (e) {
+                      console.error(e);
+                      Alert.alert("Could not save", "Please try again.");
+                    }
+                  })();
+                }}
+                activeOpacity={interaction.activeOpacitySubtle}
+                style={{ backgroundColor: colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
+              >
+                <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Save Name</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${newlyCreatedCode}` })}
+              style={{ backgroundColor: newCloudName.trim().length > 0 ? colors.sky : colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
+            >
+              <Text style={{ fontSize: 17, fontWeight: "800", color: newCloudName.trim().length > 0 ? colors.charcoal : colors.cream }}>Share Code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={dismissCreatedModal}
+              style={{ paddingVertical: 12, alignItems: "center" }}
+            >
+              <Text style={{ fontSize: 14, color: colors.ash }}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={leavingRoom !== null} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.5)", alignItems: "center", justifyContent: "center", padding: 32 }}>
           <View style={{ backgroundColor: colors.cream, borderRadius: 24, padding: 28, width: "100%" }}>
