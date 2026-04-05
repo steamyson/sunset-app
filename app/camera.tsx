@@ -26,7 +26,7 @@ import RecipientSelector from "../components/RecipientSelector";
 import { CropView } from "../components/CropView";
 import { FilterView } from "../components/FilterView";
 import { FilteredImage } from "../components/FilteredImage";
-import { sendPhoto } from "../utils/messages";
+import { sendPhoto, saveToMyMap } from "../utils/messages";
 import { recordCapture } from "../utils/storage";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils/filters";
 import { getDeviceId } from "../utils/device";
@@ -167,22 +167,40 @@ export default function CameraScreen() {
     setTimeout(() => setFocusPoint(null), 600);
   }
 
-  async function handleSend(roomCodes: string[]) {
-    if (!photo || !roomCodes.length) return;
+  async function handleSend(roomCodes: string[], myMap: boolean) {
+    if (!photo || (!roomCodes.length && !myMap)) return;
     setSending(true);
     setError(null);
     try {
       const deviceId = await getDeviceId();
       const info = await fetchSunsetTime();
       const win = info ? activeWindow(info) : null;
-      await sendPhoto({
-        uri: photo,
-        roomCodes,
-        deviceId,
-        filter: activeFilter,
-        adjustments: activeAdjustments,
-        captureWindow: win ?? undefined,
-      });
+
+      const promises: Promise<void>[] = [];
+      if (roomCodes.length) {
+        promises.push(
+          sendPhoto({
+            uri: photo,
+            roomCodes,
+            deviceId,
+            filter: activeFilter,
+            adjustments: activeAdjustments,
+            captureWindow: win ?? undefined,
+          })
+        );
+      }
+      if (myMap) {
+        promises.push(
+          saveToMyMap({
+            uri: photo,
+            deviceId,
+            filter: activeFilter,
+            adjustments: activeAdjustments,
+          })
+        );
+      }
+      await Promise.all(promises);
+
       recordCapture().catch(() => {});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
