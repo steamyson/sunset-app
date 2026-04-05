@@ -9,31 +9,23 @@ import {
 } from "react-native";
 import { Text } from "./Text";
 import { Ionicons } from "@expo/vector-icons";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { colors } from "../utils/theme";
 
-type ImageManipulatorModule = typeof import("expo-image-manipulator");
-let imageManipulatorModulePromise: Promise<ImageManipulatorModule | null> | null = null;
-
-async function getImageManipulatorModule(): Promise<ImageManipulatorModule | null> {
-  if (!imageManipulatorModulePromise) {
-    imageManipulatorModulePromise = import("expo-image-manipulator").catch((error) => {
-      console.warn("expo-image-manipulator unavailable, using uncropped image fallback", error);
-      return null;
-    });
-  }
-  return imageManipulatorModulePromise;
+async function normalizeImage(
+  uri: string
+): Promise<{ uri: string; width: number; height: number }> {
+  return manipulateAsync(uri, [], { compress: 0.85, format: SaveFormat.JPEG });
 }
 
 async function cropImage(
   uri: string,
   crop: { originX: number; originY: number; width: number; height: number }
 ): Promise<string> {
-  const imageManipulator = await getImageManipulatorModule();
-  if (!imageManipulator) return uri;
-  const result = await imageManipulator.manipulateAsync(
+  const result = await manipulateAsync(
     uri,
     [{ crop }],
-    { compress: 0.9, format: imageManipulator.SaveFormat.JPEG }
+    { compress: 0.9, format: SaveFormat.JPEG }
   );
   return result.uri;
 }
@@ -44,6 +36,41 @@ const MIN = 80;
 
 type Box = { l: number; t: number; r: number; b: number };
 
+/** Bitmap pixels (workUri) laid inside container width SW, height dH — handles letterboxing from `contain`. */
+type ImageLayout = {
+  dH: number;
+  ox: number;
+  oy: number;
+  s: number;
+  dispW: number;
+  dispH: number;
+};
+
+function computeImageLayout(ns: { w: number; h: number }): ImageLayout {
+  const dH = (SW * ns.h) / ns.w;
+  const s = Math.min(SW / ns.w, dH / ns.h);
+  const dispW = ns.w * s;
+  const dispH = ns.h * s;
+  const ox = (SW - dispW) / 2;
+  const oy = (dH - dispH) / 2;
+  return { dH, ox, oy, s, dispW, dispH };
+}
+
+function clampRectToImage(
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+  iw: number,
+  ih: number
+): { originX: number; originY: number; width: number; height: number } {
+  const ox = Math.max(0, Math.min(Math.round(originX), Math.max(0, iw - 1)));
+  const oy = Math.max(0, Math.min(Math.round(originY), Math.max(0, ih - 1)));
+  const w = Math.max(1, Math.min(Math.round(width), iw - ox));
+  const h = Math.max(1, Math.min(Math.round(height), ih - oy));
+  return { originX: ox, originY: oy, width: w, height: h };
+}
+
 interface Props {
   uri: string;
   onDone: (uri: string) => void;
@@ -52,8 +79,22 @@ interface Props {
 }
 
 export function CropView({ uri, onDone, onSkip, onBack }: Props) {
+  const [workUri, setWorkUri] = useState<string | null>(null);
+  const [normalizing, setNormalizing] = useState(true);
+
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const layoutRef = useRef<ImageLayout>({
+    dH: SW,
+    ox: 0,
+    oy: 0,
+    s: 1,
+    dispW: SW,
+    dispH: SW,
+  });
+
   const [displayH, setDisplayH] = useState(SW);
+  /** Mirrors layoutRef for rendering the Image at the correct offset (refs alone don’t re-render). */
+  const [layoutForRender, setLayoutForRender] = useState<ImageLayout | null>(null);
   const [cropping, setCropping] = useState(false);
 
   const [box, setBox] = useState<Box>({ l: SW * 0.1, t: 60, r: SW * 0.9, b: SW * 0.8 });
@@ -61,14 +102,41 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
   const startRef = useRef<Box>(box);
 
   useEffect(() => {
-    Image.getSize(uri, (w, h) => {
-      const dH = (SW * h) / w;
-      naturalSizeRef.current = { w, h };
-      setDisplayH(dH);
-      const b: Box = { l: SW * 0.1, t: dH * 0.1, r: SW * 0.9, b: dH * 0.9 };
-      boxRef.current = b;
-      setBox(b);
-    });
+    let cancelled = false;
+    setWorkUri(null);
+    setNormalizing(true);
+    naturalSizeRef.current = null;
+    setLayoutForRender(null);
+    (async () => {
+      try {
+        const result = await normalizeImage(uri);
+        if (cancelled) return;
+        const w = result.width;
+        const h = result.height;
+        naturalSizeRef.current = { w, h };
+        const L = computeImageLayout({ w, h });
+        layoutRef.current = L;
+        setLayoutForRender(L);
+        setDisplayH(L.dH);
+        const inset = 0.1;
+        const b: Box = {
+          l: L.ox + L.dispW * inset,
+          t: L.oy + L.dispH * inset,
+          r: L.ox + L.dispW * (1 - inset),
+          b: L.oy + L.dispH * (1 - inset),
+        };
+        boxRef.current = b;
+        setBox(b);
+        setWorkUri(result.uri);
+      } catch {
+        if (!cancelled) setWorkUri(uri);
+      } finally {
+        if (!cancelled) setNormalizing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [uri]);
 
   function updateBox(fn: (prev: Box) => Box) {
@@ -84,15 +152,16 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
         startRef.current = { ...boxRef.current };
       },
       onPanResponderMove: (_, gs) => {
-        const s = startRef.current;
-        const ns = naturalSizeRef.current;
-        const dH = ns ? (SW * ns.h) / ns.w : SW;
+        const s0 = startRef.current;
+        const { ox, oy, dispW, dispH } = layoutRef.current;
+        const xMax = ox + dispW;
+        const yMax = oy + dispH;
         updateBox(() => {
-          const next = { ...s };
-          if (hSide === "l") next.l = Math.min(s.r - MIN, Math.max(0, s.l + gs.dx));
-          else next.r = Math.max(s.l + MIN, Math.min(SW, s.r + gs.dx));
-          if (vSide === "t") next.t = Math.min(s.b - MIN, Math.max(0, s.t + gs.dy));
-          else next.b = Math.max(s.t + MIN, Math.min(dH, s.b + gs.dy));
+          const next = { ...s0 };
+          if (hSide === "l") next.l = Math.min(s0.r - MIN, Math.max(ox, s0.l + gs.dx));
+          else next.r = Math.max(s0.l + MIN, Math.min(xMax, s0.r + gs.dx));
+          if (vSide === "t") next.t = Math.min(s0.b - MIN, Math.max(oy, s0.t + gs.dy));
+          else next.b = Math.max(s0.t + MIN, Math.min(yMax, s0.b + gs.dy));
           return next;
         });
       },
@@ -106,18 +175,18 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
 
   async function applyCrop() {
     const ns = naturalSizeRef.current;
-    if (!ns) return;
+    const sourceUri = workUri;
+    if (!ns || !sourceUri) return;
+    const { ox, oy, s } = layoutRef.current;
     setCropping(true);
     try {
       const b = boxRef.current;
-      const sx = ns.w / SW;
-      const sy = ns.h / displayH;
-      const croppedUri = await cropImage(uri, {
-        originX: Math.round(b.l * sx),
-        originY: Math.round(b.t * sy),
-        width: Math.round((b.r - b.l) * sx),
-        height: Math.round((b.b - b.t) * sy),
-      });
+      const originX = (b.l - ox) / s;
+      const originY = (b.t - oy) / s;
+      const width = (b.r - b.l) / s;
+      const height = (b.b - b.t) / s;
+      const rect = clampRectToImage(originX, originY, width, height, ns.w, ns.h);
+      const croppedUri = await cropImage(sourceUri, rect);
       onDone(croppedUri);
     } catch {
       onSkip();
@@ -131,12 +200,34 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
   const cropW = r - l;
   const cropH = b - t;
 
+  const showImage = !normalizing && workUri && layoutForRender !== null;
+
+  if (normalizing || !workUri) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "black", alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator color="white" size="large" />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
-      {/* Photo */}
-      <Image source={{ uri }} style={{ width: SW, height: displayH }} resizeMode="cover" />
+      <View style={{ width: SW, height: displayH, position: "relative" }}>
+        {showImage && layoutForRender && (
+          <Image
+            source={{ uri: workUri }}
+            style={{
+              position: "absolute",
+              left: layoutForRender.ox,
+              top: layoutForRender.oy,
+              width: layoutForRender.dispW,
+              height: layoutForRender.dispH,
+            }}
+            resizeMode="contain"
+          />
+        )}
+      </View>
 
-      {/* Back / retake button */}
       <TouchableOpacity
         onPress={onBack}
         style={{
@@ -149,25 +240,21 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
         <Ionicons name="arrow-back" size={22} color="white" />
       </TouchableOpacity>
 
-      {/* Darkened overlay — 4 sides around crop box */}
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width: SW, height: t, backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: b, width: SW, height: Math.max(0, displayH - b), backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: t, width: l, height: cropH, backgroundColor: DIM }} />
       <View pointerEvents="none" style={{ position: "absolute", left: r, top: t, width: Math.max(0, SW - r), height: cropH, backgroundColor: DIM }} />
 
-      {/* Crop border */}
       <View pointerEvents="none" style={{
         position: "absolute", left: l, top: t, width: cropW, height: cropH,
         borderWidth: 1.5, borderColor: "white",
       }} />
 
-      {/* Rule-of-thirds grid lines */}
       <View pointerEvents="none" style={{ position: "absolute", left: l + cropW / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
       <View pointerEvents="none" style={{ position: "absolute", left: l + (cropW * 2) / 3, top: t, width: 1, height: cropH, backgroundColor: "rgba(255,255,255,0.3)" }} />
       <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + cropH / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
       <View pointerEvents="none" style={{ position: "absolute", left: l, top: t + (cropH * 2) / 3, width: cropW, height: 1, backgroundColor: "rgba(255,255,255,0.3)" }} />
 
-      {/* Corner handles */}
       {[
         { panHandlers: tlPan.panHandlers, style: { left: l - HANDLE / 2, top: t - HANDLE / 2 } },
         { panHandlers: trPan.panHandlers, style: { left: r - HANDLE / 2, top: t - HANDLE / 2 } },
@@ -191,7 +278,6 @@ export function CropView({ uri, onDone, onSkip, onBack }: Props) {
         />
       ))}
 
-      {/* Buttons */}
       <View style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         flexDirection: "row", gap: 14, padding: 28, paddingBottom: 48,
