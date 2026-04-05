@@ -23,19 +23,19 @@ race conditions, and data consistency.
 
 ## 2. Critical Issues
 
-### 2.1 Google Maps API key exposed in `app.json`
+### 2.1 Google Maps API key (was exposed in `app.json` history)
 
-```
-android.config.googleMaps.apiKey: "AIzaSyD5zuKDvgpxzRlEHoDV4FH8HA15EyZaOo0"
-```
+Previously the Android Maps key lived in `app.json` and appeared in git history.
+It is now supplied via **`EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`** in `app.config.ts`
+(see `android.config.googleMaps.apiKey` from `process.env`). Local value:
+`.env.local` (gitignored); EAS: project environment variables.
 
-This key is committed to the repo in plaintext. Anyone cloning or inspecting the
-APK can extract it. Restrict the key in Google Cloud Console to your bundle ID
-and consider moving it to an environment variable or `app.config.ts` that reads
-from `.env.local`.
-
-**Remedial action:** Rotate the key, restrict it per platform in Google Cloud,
-move it out of `app.json`.
+**If the repo was ever public:** treat any key that appeared in history or docs
+as **compromised** — revoke it in Google Cloud, create a **new** key with app
+restrictions (Android package + SHA-1), update `.env.local` and Expo/EAS env
+only (never commit the literal key). Optional: rewrite git history to remove the
+old blob (e.g. `git filter-repo`); **revocation is mandatory**, history rewrite is
+optional hygiene.
 
 ### 2.2 Race condition in `joinRoom` — non-atomic member append
 

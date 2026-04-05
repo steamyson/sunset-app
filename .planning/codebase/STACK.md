@@ -62,7 +62,7 @@
 
 **Maps:**
 - react-native-maps 1.26.20 - Google Maps integration (Android/iOS only, web fallback)
-- Google Maps API key in `app.json` under `android.config.googleMaps.apiKey`
+- Google Maps API key: `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` via `app.config.ts` (`.env.local` / EAS env)
 
 **Icons & Fonts:**
 - @expo/vector-icons 15.1.1 - Ionicons for UI chrome

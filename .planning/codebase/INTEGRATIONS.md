@@ -22,7 +22,7 @@
 
 **Maps:**
 - Google Maps API (Android only)
-  - API key: Hardcoded in `app.json` under `android.config.googleMaps.apiKey`
+  - API key: `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` → `app.config.ts` sets `android.config.googleMaps.apiKey` (not committed; `.env.local` / EAS env)
   - Package: `react-native-maps` 1.26.20
   - Clustering: 80m radius grouping in `app/(tabs)/map.tsx`
   - Custom map style in `utils/mapStyle.ts` (warm sunset/earth palette)
