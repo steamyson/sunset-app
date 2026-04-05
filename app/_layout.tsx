@@ -7,11 +7,13 @@ import { useFonts } from "expo-font";
 import { Caveat_400Regular, Caveat_700Bold } from "@expo-google-fonts/caveat";
 import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
+import { getItem } from "../utils/storage";
 import { getDeviceId } from "../utils/device";
-import { setDeviceSession } from "../utils/supabase";
+import { setDeviceSessionWithRetry } from "../utils/supabase";
 import { registerPushToken } from "../utils/push";
 import { getAuthUser, linkDeviceToUser } from "../utils/auth";
 import { SunriseIntro } from "../components/SunriseIntro";
+import { markIntroFinished } from "../utils/introGate";
 import { joinRoom } from "../utils/rooms";
 
 function extractRoomCode(url: string): string | null {
@@ -47,7 +49,9 @@ export default function RootLayout() {
       await initNotifications();
       const [nickname, deviceId] = await Promise.all([getLocalNickname(), getDeviceId()]);
       if (deviceId) {
-        setDeviceSession(deviceId).catch(() => {});
+        setDeviceSessionWithRetry(deviceId).catch((err) => {
+          console.error("Device session could not be established", err);
+        });
         registerPushToken(deviceId).catch(() => {});
       }
 
@@ -57,6 +61,11 @@ export default function RootLayout() {
 
       if (!nickname) {
         router.replace("/setup");
+        return;
+      }
+      const onboardingDone = await getItem("onboarding_complete");
+      if (!onboardingDone) {
+        router.replace("/onboarding");
         return;
       }
       router.replace("/home");
@@ -81,7 +90,14 @@ export default function RootLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
-      {showIntro && <SunriseIntro onFinish={() => setShowIntro(false)} />}
+      {showIntro && (
+        <SunriseIntro
+          onFinish={() => {
+            markIntroFinished();
+            setShowIntro(false);
+          }}
+        />
+      )}
     </View>
   );
 }
