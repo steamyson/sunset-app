@@ -145,7 +145,7 @@ export function thumbUrl(url: string, width = 1080): string {
   );
 }
 
-async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
+export async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
   const strippedUri = await stripExifReencodeToJpeg(uri);
   const path = `${deviceId}/${Date.now()}.jpg`;
 
@@ -168,6 +168,42 @@ async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
   if (error) logAndThrow("uploadPhoto", error);
 
   return path;
+}
+
+const MY_MAP_PINS_KEY = "my_map_pins_v1";
+
+export async function saveToMyMap(opts: {
+  uri: string;
+  deviceId: string;
+  filter?: string;
+  adjustments?: object;
+}): Promise<void> {
+  const [photoPath, location] = await Promise.all([
+    uploadPhoto(opts.uri, opts.deviceId),
+    getLocation(),
+  ]);
+  const { data: urlData } = supabase.storage.from("photos").getPublicUrl(photoPath);
+  const pin: Message = {
+    id: `local_${Date.now()}`,
+    sender_device_id: opts.deviceId,
+    room_id: "",
+    photo_url: urlData.publicUrl,
+    created_at: new Date().toISOString(),
+    lat: location?.lat != null ? roundStoredCoord(location.lat) : null,
+    lng: location?.lng != null ? roundStoredCoord(location.lng) : null,
+    filter: opts.filter ?? null,
+    adjustments: opts.adjustments ? JSON.stringify(opts.adjustments) : null,
+  };
+  const raw = await getItem(MY_MAP_PINS_KEY);
+  const pins: Message[] = safeJsonParse(raw, []);
+  pins.push(pin);
+  await setItem(MY_MAP_PINS_KEY, JSON.stringify(pins));
+}
+
+export async function getLocalMapPins(): Promise<Message[]> {
+  const raw = await getItem(MY_MAP_PINS_KEY);
+  const pins: Message[] = safeJsonParse(raw, []);
+  return mapWithSignedPhotoUrls(pins);
 }
 
 export async function sendPhoto({
@@ -280,6 +316,14 @@ export async function fetchMessagesWithLocation(opts: {
     if (msg.photo_url) seen.add(msg.photo_url);
     deduped.push(msg);
     if (deduped.length >= pageSize) break;
+  }
+  if (opts.mode === "mine") {
+    const localPins = await getLocalMapPins();
+    const withLocation = localPins.filter((p) => p.lat != null && p.lng != null);
+    const merged = [...deduped, ...withLocation];
+    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // Local pins already signed by getLocalMapPins; DB results need signing
+    return mapWithSignedPhotoUrls(merged);
   }
   return mapWithSignedPhotoUrls(deduped);
 }
