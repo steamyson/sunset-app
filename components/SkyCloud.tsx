@@ -13,6 +13,10 @@ const VB_W = 240;
 const VB_H = 185; // tall enough that mirrored bottom bumps are never clipped
 const ASPECT = VB_H / VB_W;
 
+const CLOUD_AVATAR_SIZE = 27;
+const CLOUD_AVATAR_RADIUS = CLOUD_AVATAR_SIZE / 2;
+const CLOUD_AVATAR_OVERLAP = 9;
+
 // ─── Shape variants ───────────────────────────────────────────────────────────
 type BumpDef = [number, number, number]; // cx, cy, r
 
@@ -199,24 +203,24 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
               <View
                 key={av.type === "preset" ? av.id : av.uri}
                 style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 9,
+                  width: CLOUD_AVATAR_SIZE,
+                  height: CLOUD_AVATAR_SIZE,
+                  borderRadius: CLOUD_AVATAR_RADIUS,
                   backgroundColor: av.type === "preset" ? av.bg : colors.mist,
                   alignItems: "center",
                   justifyContent: "center",
                   borderWidth: 1.5,
                   borderColor: "#FFFDF8",
                   overflow: "hidden",
-                  marginRight: i > 0 ? -6 : 0,
+                  marginRight: i > 0 ? -CLOUD_AVATAR_OVERLAP : 0,
                 }}
               >
                 {av.type === "preset" ? (
-                  <Text style={{ fontSize: 10, lineHeight: 13 }}>{av.emoji}</Text>
+                  <Text style={{ fontSize: 15, lineHeight: 20 }}>{av.emoji}</Text>
                 ) : (
                   <Image
                     source={{ uri: av.uri }}
-                    style={{ width: 18, height: 18 }}
+                    style={{ width: CLOUD_AVATAR_SIZE, height: CLOUD_AVATAR_SIZE }}
                     resizeMode="cover"
                   />
                 )}
