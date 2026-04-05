@@ -61,6 +61,7 @@ function CameraButton() {
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = 68 + insets.bottom;
+  const tabBarHeightTall = 80 + insets.bottom;
 
   return (
     <Tabs
@@ -86,6 +87,15 @@ export default function TabLayout() {
         options={{
           title: "Feed",
           tabBarIcon: ({ focused }) => <TabIcon name="sunny" focused={focused} />,
+          tabBarStyle: {
+            backgroundColor: colors.sky,
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowOpacity: 0,
+            paddingBottom: insets.bottom + 8,
+            paddingTop: 16,
+            height: tabBarHeightTall,
+          },
         }}
       />
       <Tabs.Screen
@@ -125,6 +135,15 @@ export default function TabLayout() {
         options={{
           title: "Profile",
           tabBarIcon: ({ focused }) => <TabIcon name="person-circle" focused={focused} />,
+          tabBarStyle: {
+            backgroundColor: colors.sky,
+            borderTopWidth: 0,
+            elevation: 0,
+            shadowOpacity: 0,
+            paddingBottom: insets.bottom + 8,
+            paddingTop: 16,
+            height: tabBarHeightTall,
+          },
         }}
       />
     </Tabs>
