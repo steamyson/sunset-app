@@ -342,7 +342,6 @@ function StepProfile({ onAdvance }: { onAdvance: () => void }) {
         {facePhase === "crop" && cropInputUri ? (
           <CropView
             uri={cropInputUri}
-            circular
             onDone={(croppedUri) => {
               void applyPickedUri(croppedUri, true);
             }}

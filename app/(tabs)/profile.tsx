@@ -227,6 +227,28 @@ export default function ProfileScreen() {
     }
   }
 
+  async function handleTakePhoto() {
+    try {
+      const ImagePicker = await import("expo-image-picker");
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow camera access to take a profile picture.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.9,
+        cameraType: ImagePicker.CameraType.front,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      setShowAvatarPicker(false);
+      setCropUri(result.assets[0].uri);
+    } catch {
+      Alert.alert("Could not open camera.");
+    }
+  }
+
   async function handleCropDone(croppedUri: string) {
     setCropUri(null);
     const uri = await persistPhotoUri(croppedUri);
@@ -783,19 +805,33 @@ export default function ProfileScreen() {
               })}
             </View>
 
-            {/* Upload photo */}
-            <TouchableOpacity
-              onPress={handlePickPhoto}
-              activeOpacity={interaction.activeOpacitySubtle}
-              style={{
-                backgroundColor: colors.charcoal, borderRadius: 16,
-                paddingVertical: 16, alignItems: "center", flexDirection: "row",
-                justifyContent: "center", gap: 10,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>🖼️</Text>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.cream }}>Upload a Photo</Text>
-            </TouchableOpacity>
+            {/* Photo options */}
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                onPress={handleTakePhoto}
+                activeOpacity={interaction.activeOpacitySubtle}
+                style={{
+                  flex: 1, backgroundColor: colors.ember, borderRadius: 16,
+                  paddingVertical: 16, alignItems: "center", flexDirection: "row",
+                  justifyContent: "center", gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 16 }}>📸</Text>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: colors.cream }}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handlePickPhoto}
+                activeOpacity={interaction.activeOpacitySubtle}
+                style={{
+                  flex: 1, backgroundColor: colors.charcoal, borderRadius: 16,
+                  paddingVertical: 16, alignItems: "center", flexDirection: "row",
+                  justifyContent: "center", gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 16 }}>🖼️</Text>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: colors.cream }}>Library</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -902,7 +938,6 @@ export default function ProfileScreen() {
         {cropUri && (
           <CropView
             uri={cropUri}
-            circular
             onDone={handleCropDone}
             onSkip={() => { if (cropUri) void handleCropDone(cropUri); }}
             onBack={() => setCropUri(null)}
