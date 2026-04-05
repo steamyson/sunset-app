@@ -32,6 +32,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
 import { fetchMessagesWithLocation, thumbUrl, type Message } from "../../utils/messages";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
 import { reverseGeocode } from "../../utils/geocoding";
@@ -308,15 +309,15 @@ const BADGE_DELTA_THRESHOLD = 0.5;
 const PIN_SIZE = 48;
 
 /**
- * Android's MapView renders custom Marker children to a native bitmap.
- * Remote-URI images load asynchronously, but the bitmap is captured before
- * the pixels arrive — producing an empty circle.  Even tracksViewChanges
- * doesn't reliably re-capture after the Image paints on Fabric.
+ * Android Fabric: RN's Image component never paints into the Marker
+ * bitmap snapshot (tested remote, file://, data: URIs + tracksViewChanges
+ * + key remounting).  The only reliable path is the Marker's native
+ * `image` prop, which goes through Google Maps SDK BitmapDescriptorFactory.
  *
- * Fix: download the thumbnail to FileSystem.cacheDirectory, then render with
- * the local file:// URI (loads synchronously into the bitmap).  A key change
- * on the Marker forces a fresh bitmap capture once the file is ready.
+ * Flow: download → resize to 96px → use local file URI as `image` prop.
  */
+const PIN_THUMB_SIZE = 96;
+
 function ClusterMapMarker({
   cluster,
   zoomedIn,
@@ -328,31 +329,39 @@ function ClusterMapMarker({
 }) {
   const thumbMsg = useMemo(() => clusterNewestWithPhoto(cluster.messages), [cluster]);
   const remoteUri = thumbMsg?.photo_url || null;
-  const [dataUri, setDataUri] = useState<string | null>(null);
+  const [localThumb, setLocalThumb] = useState<string | null>(null);
 
   useEffect(() => {
     if (!remoteUri || !thumbMsg) {
-      setDataUri(null);
+      setLocalThumb(null);
       return;
     }
     let cancelled = false;
-    const dest = `${FileSystem.cacheDirectory}map_pin_${thumbMsg.id}.jpg`;
+    const thumbDest = `${FileSystem.cacheDirectory}map_pin_${thumbMsg.id}_${PIN_THUMB_SIZE}.jpg`;
 
     (async () => {
       try {
-        const info = await FileSystem.getInfoAsync(dest);
-        if (!info.exists) {
-          const result = await FileSystem.downloadAsync(remoteUri, dest);
-          if (cancelled) return;
-          if (result.status < 200 || result.status >= 300) {
-            await FileSystem.deleteAsync(dest, { idempotent: true });
-            return;
+        const thumbInfo = await FileSystem.getInfoAsync(thumbDest);
+        if (!thumbInfo.exists) {
+          const origDest = `${FileSystem.cacheDirectory}map_pin_${thumbMsg.id}.jpg`;
+          const origInfo = await FileSystem.getInfoAsync(origDest);
+          if (!origInfo.exists) {
+            const dl = await FileSystem.downloadAsync(remoteUri, origDest);
+            if (cancelled) return;
+            if (dl.status < 200 || dl.status >= 300) {
+              await FileSystem.deleteAsync(origDest, { idempotent: true });
+              return;
+            }
           }
+          const resized = await manipulateAsync(
+            origDest,
+            [{ resize: { width: PIN_THUMB_SIZE } }],
+            { compress: 0.7, format: SaveFormat.JPEG },
+          );
+          if (cancelled) return;
+          await FileSystem.moveAsync({ from: resized.uri, to: thumbDest });
         }
-        const b64 = await FileSystem.readAsStringAsync(dest, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!cancelled) setDataUri(`data:image/jpeg;base64,${b64}`);
+        if (!cancelled) setLocalThumb(thumbDest);
       } catch (e: any) {
         if (!cancelled) console.warn(`[MapPin] ${cluster.id}: ${e?.message ?? e}`);
       }
@@ -360,30 +369,20 @@ function ClusterMapMarker({
     return () => { cancelled = true; };
   }, [remoteUri, thumbMsg?.id, cluster.id]);
 
+  const hasThumb = Boolean(localThumb);
+
   return (
     <Marker
-      key={dataUri ? `${cluster.id}_img` : cluster.id}
       coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
       tracksViewChanges={false}
+      image={hasThumb ? { uri: localThumb! } : undefined}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onOpen(cluster.messages);
       }}
     >
-      <View style={{ alignItems: "center" }} collapsable={false}>
-        {dataUri ? (
-          <Image
-            source={{ uri: dataUri }}
-            style={{
-              width: PIN_SIZE,
-              height: PIN_SIZE,
-              borderRadius: PIN_SIZE / 2,
-              borderWidth: 3,
-              borderColor: "white",
-            }}
-            resizeMode="cover"
-          />
-        ) : (
+      {!hasThumb ? (
+        <View style={{ alignItems: "center" }} collapsable={false}>
           <View
             collapsable={false}
             style={{
@@ -399,38 +398,16 @@ function ClusterMapMarker({
           >
             <Text style={{ fontSize: 20 }}>🌅</Text>
           </View>
-        )}
-        {cluster.messages.length > 1 && zoomedIn && (
           <View
             style={{
-              backgroundColor: colors.ember,
-              borderRadius: 10,
-              paddingHorizontal: 6,
-              paddingVertical: 2,
-              marginTop: 3,
-              minWidth: 20,
-              alignItems: "center",
+              width: 0, height: 0,
+              borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
+              borderLeftColor: "transparent", borderRightColor: "transparent",
+              borderTopColor: "white", marginTop: 2,
             }}
-          >
-            <Text style={{ color: "white", fontSize: 11, fontWeight: "800", lineHeight: 14 }}>
-              {cluster.messages.length}
-            </Text>
-          </View>
-        )}
-        <View
-          style={{
-            width: 0,
-            height: 0,
-            borderLeftWidth: 5,
-            borderRightWidth: 5,
-            borderTopWidth: 8,
-            borderLeftColor: "transparent",
-            borderRightColor: "transparent",
-            borderTopColor: "white",
-            marginTop: 2,
-          }}
-        />
-      </View>
+          />
+        </View>
+      ) : null}
     </Marker>
   );
 }

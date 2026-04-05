@@ -168,6 +168,7 @@ export default function RoomThread() {
   const capturingRef = useRef(false);
   const cameraRef = useRef<CameraView>(null);
   const sunsetAnim = useRef(new Animated.Value(0)).current;
+  const sunsetScale = useRef(new Animated.Value(0.8)).current;
   const roomIdRef = useRef<string | null>(null);
   const locationRef = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
   const loadedCodeRef = useRef<string | null>(null);
@@ -184,6 +185,7 @@ export default function RoomThread() {
   useEffect(() => {
     let cancelled = false;
     sunsetAnim.setValue(0);
+    sunsetScale.setValue(0.8);
     async function checkUnreadFlag() {
       const unreadFromParam = params.unread === "true" || params.unread === "1";
       if (unreadFromParam) {
@@ -202,14 +204,12 @@ export default function RoomThread() {
     if (feedLoading) setFirstFeedImageReady(false);
   }, [feedLoading]);
 
-  // Warm first cover in background for unread flash — does not gate firstFeedImageReady.
+  // Prefetch first cover — firstFeedImageReady is now set by the image's onLoadEnd, not here.
   useEffect(() => {
-    if (feedLoading || posts.length === 0) return;
-    setFirstFeedImageReady(true);
     const url = posts[0]?.photo_url;
     if (!url) return;
     Image.prefetch(thumbUrl(url)).catch(() => {});
-  }, [feedLoading, posts.length, posts[0]?.id, posts[0]?.photo_url]);
+  }, [posts[0]?.id, posts[0]?.photo_url]);
 
   useEffect(() => {
     if (loading) {
@@ -228,14 +228,14 @@ export default function RoomThread() {
   useEffect(() => {
     if (!unreadFlashPending || !code) return;
     if (feedLoading) return;
-    const hasContent = posts.length > 0 || messages.length > 0;
+    const hasContent = messages.length > 0;
     if (!hasContent) {
       setUnreadFlashPending(false);
       markRoomRead(code);
       return;
     }
-    const feedCoversReady = posts.length === 0 || firstFeedImageReady;
-    if (!feedCoversReady) return;
+    // Wait for the first rendered image to actually load before flashing
+    if (!firstFeedImageReady) return;
     setUnreadFlashPending(false);
     const handle = InteractionManager.runAfterInteractions(() => {
       runSunsetFlash(() => markRoomRead(code));
@@ -244,7 +244,6 @@ export default function RoomThread() {
   }, [
     unreadFlashPending,
     feedLoading,
-    posts.length,
     messages.length,
     firstFeedImageReady,
     code,
@@ -252,23 +251,34 @@ export default function RoomThread() {
 
   function runSunsetFlash(onComplete?: () => void) {
     sunsetAnim.setValue(0);
-    Animated.sequence([
-      Animated.timing(sunsetAnim, {
-        toValue: 1,
-        duration: 400,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(sunsetAnim, {
-        toValue: 1,
-        duration: 300,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sunsetAnim, {
-        toValue: 0,
-        duration: 600,
-        easing: Easing.in(Easing.quad),
+    sunsetScale.setValue(0.8);
+    Animated.parallel([
+      // Opacity: instant burst → brief hold → long warm afterglow
+      Animated.sequence([
+        Animated.timing(sunsetAnim, {
+          toValue: 1,
+          duration: 120,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(sunsetAnim, {
+          toValue: 0.85,
+          duration: 100,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(sunsetAnim, {
+          toValue: 0,
+          duration: 950,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+      // Scale: radiates outward as it glows
+      Animated.timing(sunsetScale, {
+        toValue: 1.25,
+        duration: 1170,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start(() => onComplete?.());
@@ -753,33 +763,39 @@ export default function RoomThread() {
   return (
     <ParticleTrail style={{ backgroundColor: colors.warmWhite }} disabled={!particlesReady}>
     <View style={styles.roomWrapper}>
-      {/* Warm radial glow — one-time when unread, after content is visible */}
-      <View
-        style={[StyleSheet.absoluteFillObject, { zIndex: 10 }]}
-        pointerEvents="none"
-      >
+      {/* Warm sunset flash — behind all content, fills the screen */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, {
+            backgroundColor: colors.amber,
+            opacity: Animated.multiply(sunsetAnim, 0.45),
+            transform: [{ scale: sunsetScale }],
+          }]}
+        />
         <Animated.View
           style={{
             position: "absolute",
-            width: SCREEN_W * 1.55,
-            height: SCREEN_W * 1.32,
-            borderRadius: (SCREEN_W * 1.55) / 2,
-            backgroundColor: colors.amber,
-            opacity: Animated.multiply(sunsetAnim, 0.26),
-            left: SCREEN_W * 0.5 - (SCREEN_W * 1.55) / 2,
-            top: SCREEN_H * 0.1,
+            width: SCREEN_W * 2.4,
+            height: SCREEN_W * 2.4,
+            borderRadius: SCREEN_W * 1.2,
+            backgroundColor: colors.sunRayMid,
+            opacity: Animated.multiply(sunsetAnim, 0.55),
+            left: SCREEN_W * 0.5 - SCREEN_W * 1.2,
+            top: SCREEN_H * 0.35 - SCREEN_W * 1.2,
+            transform: [{ scale: sunsetScale }],
           }}
         />
         <Animated.View
           style={{
             position: "absolute",
-            width: SCREEN_W * 1.12,
-            height: SCREEN_W * 0.98,
-            borderRadius: (SCREEN_W * 1.12) / 2,
-            backgroundColor: colors.sunRayMid,
-            opacity: Animated.multiply(sunsetAnim, 0.34),
-            left: SCREEN_W * 0.5 - (SCREEN_W * 1.12) / 2,
-            top: SCREEN_H * 0.18,
+            width: SCREEN_W * 1.4,
+            height: SCREEN_W * 1.4,
+            borderRadius: SCREEN_W * 0.7,
+            backgroundColor: colors.amber,
+            opacity: Animated.multiply(sunsetAnim, 0.65),
+            left: SCREEN_W * 0.5 - SCREEN_W * 0.7,
+            top: SCREEN_H * 0.35 - SCREEN_W * 0.7,
+            transform: [{ scale: sunsetScale }],
           }}
         />
       </View>
@@ -920,7 +936,7 @@ export default function RoomThread() {
           maxToRenderPerBatch={5}
           windowSize={5}
           contentContainerStyle={{ paddingBottom: 40 }}
-          renderItem={({ item: msg }) => (
+          renderItem={({ item: msg, index: msgIndex }) => (
             <MessageBubble
               message={msg}
               isMe={msg.sender_device_id === myDeviceId}
@@ -934,6 +950,7 @@ export default function RoomThread() {
               deviceId={myDeviceId ?? ""}
               onReactionUpdate={(emoji, added) => handleReactionUpdate(msg.id, emoji, added)}
               location={locationMap[msg.id] ?? null}
+              onFirstLoad={msgIndex === 0 ? () => setFirstFeedImageReady(true) : undefined}
             />
           )}
           ListFooterComponent={chatHasMore ? (
@@ -1314,7 +1331,7 @@ function ExpiryCountdown({ expiresAtISO }: { expiresAtISO: string }) {
 }
 
 function MessageBubble({
-  message, isMe, displayName, onReport, reactions, deviceId, onReactionUpdate, location,
+  message, isMe, displayName, onReport, reactions, deviceId, onReactionUpdate, location, onFirstLoad,
 }: {
   message: Message;
   isMe: boolean;
@@ -1324,6 +1341,7 @@ function MessageBubble({
   deviceId: string;
   onReactionUpdate: (emoji: string, added: boolean) => void;
   location: string | null;
+  onFirstLoad?: () => void;
 }) {
   const expired = isExpired(message);
   if (expired) return null;
@@ -1363,6 +1381,7 @@ function MessageBubble({
           adjustments={(() => { try { return message.adjustments ? JSON.parse(message.adjustments) : null; } catch { return null; } })()}
           width={SCREEN_W - 32}
           height={(SCREEN_W - 32) * 1.1}
+          onLoad={onFirstLoad}
         />
         {/* Location badge */}
         {location && (

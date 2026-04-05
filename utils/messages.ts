@@ -211,7 +211,7 @@ export async function sendPhoto({
       lng,
       filter: filter ?? null,
       adjustments: adjustments ? JSON.stringify(adjustments) : null,
-      capture_window: captureWindow ?? null,
+      // capture_window: captureWindow ?? null, // migration not yet applied
     }))
   );
 

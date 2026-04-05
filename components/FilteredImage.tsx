@@ -60,9 +60,10 @@ interface Props {
   width: number;
   height: number;
   resizeMode?: "cover" | "contain" | "stretch" | "center";
+  onLoad?: () => void;
 }
 
-export function FilteredImage({ uri, filter, adjustments, width, height, resizeMode = "cover" }: Props) {
+export function FilteredImage({ uri, filter, adjustments, width, height, resizeMode = "cover", onLoad }: Props) {
   const name = (filter as FilterName) ?? "original";
   const filters = buildFilters(name, adjustments);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -75,7 +76,8 @@ export function FilteredImage({ uri, filter, adjustments, width, height, resizeM
 
   const onLoadEnd = useCallback(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-  }, [fadeAnim]);
+    onLoad?.();
+  }, [fadeAnim, onLoad]);
 
   if (filters.length === 0) {
     return (

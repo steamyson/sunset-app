@@ -55,7 +55,7 @@ export const WINDOW_BEFORE_MS = SUNSET_WINDOW_BEFORE_MS;
 export const WINDOW_AFTER_MS = SUNSET_WINDOW_AFTER_MS;
 
 /** Set to `false` before release — skips golden-hour gate on the main camera screen only. */
-export const UNLOCK_CAMERA_FOR_TESTING = false;
+export const UNLOCK_CAMERA_FOR_TESTING = true;
 
 function boundsForLabel(label: GoldenWindowLabel, eventTime: Date): GoldenHourWindow {
   const t = eventTime.getTime();
