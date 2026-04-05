@@ -1,9 +1,9 @@
 import { View, Image, Animated, Easing, Dimensions } from "react-native";
-import Svg, { Circle, Ellipse } from "react-native-svg";
+import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Stop } from "react-native-svg";
 import { Text } from "./Text";
 import { colors } from "../utils/theme";
 import type { Avatar } from "../utils/avatar";
-import { forwardRef, useEffect, useRef } from "react";
+import { forwardRef, useEffect, useId, useRef } from "react";
 
 // Sunset color layers — unread pulse on sky canvas (bleed through semi-transparent cloud)
 const SUNSET_ORANGE = "#FF8C42";
@@ -77,7 +77,51 @@ const SHAPE_VARIANTS: VariantDef[] = [
   },
 ];
 
+/** One circle as a closed subpath (for compound paths / nonzero union). */
+function circleSubpath(cx: number, cy: number, r: number): string {
+  return `M ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy}`;
+}
+
+/** One ellipse as a closed subpath. */
+function ellipseSubpath(cx: number, cy: number, rx: number, ry: number): string {
+  return `M ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy}`;
+}
+
 // ─── Cloud shape SVG ──────────────────────────────────────────────────────────
+/** Same geometry as the visible cloud; `fill` may be a solid or `url(#id)` gradient. */
+function CloudSilhouette({ variant = 0, fill }: { variant?: number; fill: string }) {
+  const v = SHAPE_VARIANTS[variant % SHAPE_VARIANTS.length];
+  return (
+    <>
+      {v.bumps.map(([cx, cy, r], i) => (
+        <Circle key={`t${i}`} cx={cx} cy={cy} r={r} fill={fill} />
+      ))}
+      <Ellipse cx={v.base.cx} cy={v.base.cy} rx={v.base.rx} ry={v.base.ry} fill={fill} />
+      {v.bottomBumps?.map(([cx, cy, r], i) => (
+        <Circle key={`b${i}`} cx={cx} cy={cy} r={r} fill={fill} />
+      ))}
+    </>
+  );
+}
+
+/** Single compound path = one filled region (union), no overlap seams — use for gradient tint. */
+function CloudUnionPath({
+  variant = 0,
+  fill,
+}: {
+  variant?: number;
+  fill: string;
+}) {
+  const v = SHAPE_VARIANTS[variant % SHAPE_VARIANTS.length];
+  const sub: string[] = [];
+  for (const [cx, cy, r] of v.bumps) sub.push(circleSubpath(cx, cy, r));
+  sub.push(ellipseSubpath(v.base.cx, v.base.cy, v.base.rx, v.base.ry));
+  for (const b of v.bottomBumps ?? []) {
+    sub.push(circleSubpath(b[0], b[1], b[2]));
+  }
+  return <Path d={sub.join(" ")} fill={fill} fillRule="nonzero" />;
+}
+
 function CloudShape({
   width,
   height,
@@ -89,23 +133,9 @@ function CloudShape({
   fill: string;
   variant?: number;
 }) {
-  const v = SHAPE_VARIANTS[variant % SHAPE_VARIANTS.length];
   return (
     <Svg width={width} height={height} viewBox={`0 0 ${VB_W} ${VB_H}`}>
-
-
-      {/* Top bumps — rendered before base so base covers their inner halves */}
-      {v.bumps.map(([cx, cy, r], i) => (
-        <Circle key={`t${i}`} cx={cx} cy={cy} r={r} fill={fill} />
-      ))}
-
-      {/* Base ellipse */}
-      <Ellipse cx={v.base.cx} cy={v.base.cy} rx={v.base.rx} ry={v.base.ry} fill={fill} />
-
-      {/* Bottom bumps — rendered after base, protrude below */}
-      {v.bottomBumps?.map(([cx, cy, r], i) => (
-        <Circle key={`b${i}`} cx={cx} cy={cy} r={r} fill={fill} />
-      ))}
+      <CloudSilhouette variant={variant} fill={fill} />
     </Svg>
   );
 }
@@ -119,13 +149,17 @@ type CloudProps = {
   variant?: number;
   hideLabel?: boolean;
   avatars?: Avatar[];
+  /** Sky canvas: tint cloud with gradient clipped to the same silhouette (multi-leave select). */
+  leaveSelected?: boolean;
 };
 
 export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
-  { name, width, unread, lifted, variant = 0, hideLabel = false, avatars },
+  { name, width, unread, lifted, variant = 0, hideLabel = false, avatars, leaveSelected = false },
   ref
 ) {
   const height = width * ASPECT;
+  const leaveIdBase = useId().replace(/[^a-zA-Z0-9_]/g, "_");
+  const leaveGradId = `lv_g_${leaveIdBase}`;
   const glowAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -169,6 +203,21 @@ export const SkyCloud = forwardRef<View, CloudProps>(function SkyCloud(
         <View style={{ position: "absolute", opacity: unread ? 0.78 : 1 }}>
           <CloudShape width={width} height={height} fill={surfaceFill} variant={variant} />
         </View>
+
+        {leaveSelected && (
+          <View style={{ position: "absolute", width, height }} pointerEvents="none">
+            <Svg width={width} height={height} viewBox={`0 0 ${VB_W} ${VB_H}`} style={{ opacity: 0.78 }}>
+              <Defs>
+                <LinearGradient id={leaveGradId} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <Stop offset="0%" stopColor={colors.ember} stopOpacity={0.48} />
+                  <Stop offset="50%" stopColor={colors.magenta} stopOpacity={0.36} />
+                  <Stop offset="100%" stopColor={colors.amber} stopOpacity={0.42} />
+                </LinearGradient>
+              </Defs>
+              <CloudUnionPath variant={variant} fill={`url(#${leaveGradId})`} />
+            </Svg>
+          </View>
+        )}
 
         {!hideLabel && (
           <View style={{

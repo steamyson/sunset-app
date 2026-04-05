@@ -1192,6 +1192,7 @@ export default function ChatsScreen() {
                 if (!anims) return null;
                 const pr = getOrCreateCloudPanResponder(room, anims, cw);
                 const cloudScale = cloudScalesRef.current[room.id] ?? new Animated.Value(1);
+                const selectedForLeave = selectModeForLeave && selectedRoomIds.has(room.id);
                 // Ensure per-cloud ref exists for measureInWindow on tap (per D-11)
                 if (!cloudRefsRef.current[room.id]) {
                   cloudRefsRef.current[room.id] = React.createRef<View>();
@@ -1223,6 +1224,7 @@ export default function ChatsScreen() {
                           lifted={liftedRoomId === room.id}
                           variant={roomVariant(room.code)}
                           hideLabel={zoomingRoomId === room.id}
+                          leaveSelected={selectedForLeave}
                           avatars={room.members
                             .filter((id) => memberAvatars[id])
                             .map((id) => memberAvatars[id])
