@@ -140,6 +140,7 @@ export default function CameraScreen() {
   async function takePicture() {
     if (!cameraRef.current || capturingRef.current) return;
     capturingRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       const result: PhotoFile = await cameraRef.current.takePhoto({
         flash: flash === "off" ? "off" : "on",
