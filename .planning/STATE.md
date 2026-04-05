@@ -92,9 +92,10 @@ None yet.
 | 260405-0ri | New user onboarding flow: 5-step sequence (welcome, profile photo, clouds, golden hour, ready) with SecureStore gate in layout | 2026-04-05 | 4c731f8 | [260405-0ri-onboarding](./quick/260405-0ri-new-user-onboarding-flow-5-step-sequence/) |
 | 260405-1op | Two chats.tsx fixes: center fresh cloud layout (gridStartX offset + CLOUD_POS_KEY v2); room creation popup name input promoted to top/large with KeyboardAvoidingView | 2026-04-05 | 891fd0f | [260405-1op-fixes](./quick/260405-1op-two-chats-tsx-fixes-center-clouds-horizo/) |
 | 260405-lc5 | Add swipe-up gallery grid to map PinModal | 2026-04-05 | ae2adc5 | [260405-lc5-gallery](./quick/260405-lc5-add-swipe-up-gallery-grid-to-map-pinmoda/) |
+| 260405-lwr | Add My Map toggle to Send to sheet — save photo to map without sending to a room | 2026-04-05 | 7a91a39 | [260405-lwr-add-my-map](./quick/260405-lwr-add-my-map-option-to-send-to-sheet/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-05 - Completed quick task 260405-lc5: Add swipe-up gallery grid to map PinModal
+Last activity: 2026-04-05 - Completed quick task 260405-lwr: Add My Map toggle to Send to sheet
 Stopped at: Completed quick-260405-lwr: Add My Map option to send-to sheet
 Resume file: None
