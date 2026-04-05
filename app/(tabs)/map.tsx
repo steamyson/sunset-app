@@ -5,10 +5,12 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  FlatList,
   Dimensions,
   Platform,
   Linking,
   Animated,
+  PanResponder,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,6 +30,7 @@ import { useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system/legacy";
 import { fetchMessagesWithLocation, thumbUrl, type Message } from "../../utils/messages";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
 import { getDeviceId } from "../../utils/device";
@@ -96,12 +99,18 @@ function ModeToggle({ mode, onToggle }: { mode: MapMode; onToggle: (m: MapMode) 
 }
 
 // ─── Clustering (extracted to utils/clustering.ts) ──────────────────────────
-import { clusterMessages, type Cluster } from "../../utils/clustering";
+import { clusterMessages, clusterNewestWithPhoto, type Cluster } from "../../utils/clustering";
 
 // ─── Pin modal ───────────────────────────────────────────────────────────────
 function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const [placeName, setPlaceName] = useState<string | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const galleryAnim = useRef(new Animated.Value(700)).current;
+  const carouselRef = useRef<ScrollView>(null);
+  const openGalleryRef = useRef(() => {});
+  const closeGalleryRef = useRef(() => {});
+
   const current = messages[index];
 
   useEffect(() => {
@@ -111,10 +120,46 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
     }
   }, [current.id]);
 
+  // Update refs every render to avoid stale closures
+  openGalleryRef.current = () => {
+    galleryAnim.setValue(700);
+    setGalleryOpen(true);
+    Animated.spring(galleryAnim, { toValue: 0, tension: 120, friction: 8, useNativeDriver: true }).start();
+  };
+  closeGalleryRef.current = () => {
+    Animated.spring(galleryAnim, { toValue: 700, tension: 120, friction: 8, useNativeDriver: true })
+      .start(({ finished }) => { if (finished) setGalleryOpen(false); });
+  };
+
+  const handlePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy < -20 || (Math.abs(gs.dy) < 5 && Math.abs(gs.dx) < 5)) openGalleryRef.current();
+      },
+    })
+  ).current;
+
+  const galleryHeaderPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10,
+      onPanResponderRelease: (_, gs) => { if (gs.dy > 50) closeGalleryRef.current(); },
+    })
+  ).current;
+
+  function jumpToIndex(i: number) {
+    closeGalleryRef.current();
+    setTimeout(() => {
+      carouselRef.current?.scrollTo({ x: i * SCREEN_W, animated: false });
+      setIndex(i);
+    }, 350);
+  }
+
   const date = new Date(current.created_at);
   const dateLabel = date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   const timeLabel = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const PHOTO_W = SCREEN_W - 32;
+  const THUMB_W = Math.floor((SCREEN_W - 12) / 3);
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
@@ -123,6 +168,7 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
 
           {/* Swipeable photo carousel */}
           <ScrollView
+            ref={carouselRef}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
@@ -164,6 +210,19 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
             </View>
           )}
 
+          {/* Drag handle pill + view all */}
+          <View
+            {...handlePanResponder.panHandlers}
+            style={{ alignItems: "center", paddingTop: 10, paddingBottom: 8 }}
+          >
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.mist }} />
+            {messages.length > 1 && (
+              <Text style={{ fontSize: 11, color: colors.ash, marginTop: 5, letterSpacing: 0.3 }}>
+                view all {messages.length}
+              </Text>
+            )}
+          </View>
+
           {/* Info */}
           <View style={{ paddingHorizontal: 24, paddingTop: 14, paddingBottom: 40 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -182,6 +241,61 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
               <Text style={{ color: colors.cream, fontWeight: "700", fontSize: 15 }}>Close</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Gallery overlay */}
+          {galleryOpen && (
+            <Animated.View
+              style={{
+                position: "absolute",
+                top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: colors.sky,
+                transform: [{ translateY: galleryAnim }],
+              }}
+            >
+              {/* Drag handle header */}
+              <View
+                {...galleryHeaderPanResponder.panHandlers}
+                style={{ alignItems: "center", paddingTop: 10, paddingBottom: 4 }}
+              >
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.mist }} />
+              </View>
+              {/* Title + close */}
+              <View style={{
+                flexDirection: "row", alignItems: "center",
+                paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12,
+              }}>
+                <Text style={{ flex: 1, fontSize: 15, fontWeight: "700", color: colors.charcoal }}>
+                  {messages.length} sunset{messages.length !== 1 ? "s" : ""} here
+                </Text>
+                <TouchableOpacity
+                  onPress={() => closeGalleryRef.current()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="chevron-down" size={22} color={colors.charcoal} />
+                </TouchableOpacity>
+              </View>
+              {/* Thumbnail grid */}
+              <FlatList
+                data={messages}
+                keyExtractor={(m) => m.id}
+                numColumns={3}
+                contentContainerStyle={{ paddingBottom: 40 }}
+                renderItem={({ item, index: i }) => (
+                  <TouchableOpacity
+                    onPress={() => jumpToIndex(i)}
+                    activeOpacity={interaction.activeOpacity}
+                    style={{ margin: 2 }}
+                  >
+                    <Image
+                      source={{ uri: thumbUrl(item.photo_url, 300) }}
+                      style={{ width: THUMB_W, height: THUMB_W, borderRadius: 8 }}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                )}
+              />
+            </Animated.View>
+          )}
         </View>
       </View>
     </Modal>
@@ -191,6 +305,122 @@ function PinModal({ messages, onClose }: { messages: Message[]; onClose: () => v
 // ─── Native map ──────────────────────────────────────────────────────────────
 // Badge is only shown when zoomed in past this threshold (city scale)
 const BADGE_DELTA_THRESHOLD = 0.5;
+const PIN_SIZE = 48;
+
+/**
+ * Photo markers must keep `tracksViewChanges` true while a thumbnail URI exists.
+ * If we flip it false on `onLoad`, the map often snapshots too early (mist only) and never updates again.
+ */
+function ClusterMapMarker({
+  cluster,
+  zoomedIn,
+  onOpen,
+}: {
+  cluster: Cluster;
+  zoomedIn: boolean;
+  onOpen: (messages: Message[]) => void;
+}) {
+  const thumbMsg = useMemo(() => clusterNewestWithPhoto(cluster.messages), [cluster]);
+  const thumbUri = thumbMsg?.photo_url ? thumbUrl(thumbMsg.photo_url, 96) : null;
+
+  useEffect(() => {
+    if (!thumbUri) return;
+    Image.prefetch(thumbUri).catch(() => {});
+  }, [thumbUri]);
+
+  return (
+    <Marker
+      coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
+      tracksViewChanges={Boolean(thumbUri)}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onOpen(cluster.messages);
+      }}
+    >
+      <View style={{ alignItems: "center" }} collapsable={false}>
+        <View
+          style={{
+            position: "relative",
+            width: PIN_SIZE,
+            height: PIN_SIZE,
+            borderRadius: PIN_SIZE / 2,
+            borderWidth: 3,
+            borderColor: "white",
+            overflow: "hidden",
+            backgroundColor: colors.mist,
+            shadowColor: colors.charcoal,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.3,
+            shadowRadius: 6,
+            elevation: 6,
+          }}
+        >
+          {thumbUri ? (
+            <Image
+              key={thumbUri}
+              source={{ uri: thumbUri }}
+              style={{
+                position: "absolute",
+                width: PIN_SIZE,
+                height: PIN_SIZE,
+                top: 0,
+                left: 0,
+              }}
+              resizeMode="cover"
+              {...(Platform.OS === "android" ? { fadeDuration: 0 } : {})}
+            />
+          ) : (
+            <View
+              style={{
+                width: PIN_SIZE,
+                height: PIN_SIZE,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ fontSize: 20 }}>🌅</Text>
+            </View>
+          )}
+        </View>
+        {cluster.messages.length > 1 && zoomedIn && (
+          <View
+            style={{
+              backgroundColor: colors.ember,
+              borderRadius: 10,
+              paddingHorizontal: 6,
+              paddingVertical: 2,
+              marginTop: 3,
+              minWidth: 20,
+              alignItems: "center",
+              shadowColor: colors.pureBlack,
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.3,
+              shadowRadius: 2,
+              elevation: 3,
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 11, fontWeight: "800", lineHeight: 14 }}>
+              {cluster.messages.length}
+            </Text>
+          </View>
+        )}
+        <View
+          style={{
+            width: 0,
+            height: 0,
+            borderLeftWidth: 5,
+            borderRightWidth: 5,
+            borderTopWidth: 8,
+            borderLeftColor: "transparent",
+            borderRightColor: "transparent",
+            borderTopColor: "white",
+            marginTop: 2,
+          }}
+        />
+      </View>
+    </Marker>
+  );
+}
 
 function MapSkeleton() {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -304,7 +534,7 @@ function NativeMap({ messages, myCoords }: {
         customMapStyle={
           Platform.OS === "android" && PROVIDER_GOOGLE && !satellite ? mapStyle : []
         }
-        showsUserLocation
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
@@ -316,59 +546,34 @@ function NativeMap({ messages, myCoords }: {
         }}
       >
         {clusters.map((cluster) => (
-          <Marker
+          <ClusterMapMarker
             key={cluster.id}
-            coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
+            cluster={cluster}
+            zoomedIn={zoomedIn}
+            onOpen={setSelected}
+          />
+        ))}
+        {myCoords ? (
+          <Marker
+            coordinate={myCoords}
             tracksViewChanges={false}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setSelected(cluster.messages);
-            }}
+            zIndex={999}
+            anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={{ alignItems: "center" }}>
-              <View style={{
-                width: 48, height: 48, borderRadius: 24,
-                borderWidth: 3, borderColor: "white",
-                overflow: "hidden",
-                shadowColor: colors.charcoal,
-                shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: 0.3,
-                shadowRadius: 6,
-                elevation: 6,
-              }}>
-                {cluster.messages[0]?.photo_url ? (
-                  <Image source={{ uri: thumbUrl(cluster.messages[0].photo_url, 96) }} style={{ width: 48, height: 48 }} resizeMode="cover" />
-                ) : (
-                  <View style={{ width: 48, height: 48, backgroundColor: colors.mist, alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ fontSize: 20 }}>🌅</Text>
-                  </View>
-                )}
-              </View>
-              {/* Count badge — only at city scale, in normal flow so nothing clips it */}
-              {cluster.messages.length > 1 && zoomedIn && (
-                <View style={{
-                  backgroundColor: colors.ember,
-                  borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2,
-                  marginTop: 3,
-                  minWidth: 20, alignItems: "center",
-                  shadowColor: colors.pureBlack, shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.3, shadowRadius: 2, elevation: 3,
-                }}>
-                  <Text style={{ color: "white", fontSize: 11, fontWeight: "800", lineHeight: 14 }}>
-                    {cluster.messages.length}
-                  </Text>
-                </View>
-              )}
-              {/* Pin tail */}
-              <View style={{
-                width: 0, height: 0,
-                borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8,
-                borderLeftColor: "transparent", borderRightColor: "transparent",
-                borderTopColor: "white", marginTop: 2,
-              }} />
+            <View style={{ alignItems: "center", justifyContent: "center" }} collapsable={false}>
+              <View
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: colors.mapLocationDot,
+                  borderWidth: 3,
+                  borderColor: colors.pureWhite,
+                }}
+              />
             </View>
           </Marker>
-        ))}
+        ) : null}
       </MapView>
 
       {selected && <PinModal messages={selected} onClose={() => setSelected(null)} />}
