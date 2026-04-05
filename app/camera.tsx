@@ -203,7 +203,7 @@ export default function CameraScreen() {
 
       recordCapture().catch(() => {});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace("/(tabs)");
+      router.replace(myMap ? "/(tabs)/map" : "/(tabs)");
     } catch (e: any) {
       setError(e.message ?? "Failed to send.");
       setSending(false);
