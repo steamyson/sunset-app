@@ -107,9 +107,13 @@ const ParticleCanvas = forwardRef<ParticleCanvasHandle>((_, ref) => {
 // ─── Main screen ─────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const { glowAnim, pulseScale } = useSunGlowAnimation();
-  const slideAnim   = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const canvasRef   = useRef<ParticleCanvasHandle>(null);
-  const navigating  = useRef(false);
+  const slideAnim      = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const driftAnim      = useRef(new Animated.Value(0)).current;
+  const contentAnim    = useRef(new Animated.Value(0)).current;
+  const swipeAnim      = useRef(new Animated.Value(0)).current;
+  const countdownBump  = useRef(new Animated.Value(1)).current;
+  const canvasRef      = useRef<ParticleCanvasHandle>(null);
+  const navigating     = useRef(false);
 
   const [sunInfo, setSunInfo] = useState<SunsetInfo | null>(null);
   const [headline, setHeadline] = useState<string | null>(null);
@@ -151,6 +155,45 @@ export default function HomeScreen() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [sunInfo]);
+
+  // Sun float — continuous gentle vertical drift
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(driftAnim, { toValue: 1, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(driftAnim, { toValue: 0, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+  }, [driftAnim]);
+
+  // "Swipe to continue" breathing
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(swipeAnim, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(swipeAnim, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+  }, [swipeAnim]);
+
+  // Content entrance — fires when sunInfo arrives
+  useEffect(() => {
+    if (!sunInfo) return;
+    contentAnim.setValue(0);
+    Animated.timing(contentAnim, { toValue: 1, duration: 550, delay: 80, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [sunInfo]);
+
+  // Countdown tick bump
+  useEffect(() => {
+    if (!countdown) return;
+    countdownBump.setValue(1.08);
+    Animated.spring(countdownBump, { toValue: 1, tension: 200, friction: 10, useNativeDriver: true }).start();
+  }, [countdown]);
+
+  const sunDriftY      = driftAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -18] });
+  const swipeOpacity   = swipeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.65] });
+  const contentOpacity = contentAnim;
+  const contentSlideY  = contentAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
 
   function flickOff(dx: number, dy: number) {
     if (navigating.current) return;
@@ -198,26 +241,28 @@ export default function HomeScreen() {
         style={{ flex: 1, transform: slideAnim.getTranslateTransform() }}
         {...pan.panHandlers}
       >
-        <SunGlow
-          width={W}
-          height={H}
-          glowAnim={glowAnim}
-          pulseScale={pulseScale}
-          rayOuterHeightFactor={0.72}
-          rayMidHeightFactor={0.58}
-          rayInnerHeightFactor={0.44}
-          rayOuterOpacity={0.18}
-          rayMidOpacity={0.13}
-          rayInnerOpacity={0.22}
-          sunOuterSize={340}
-          sunMidSize={250}
-          sunCoreSize={150}
-          sunHighlightSize={28}
-          sunMidOffset={45}
-          sunCoreOffset={95}
-          sunHighlightOffsetX={116}
-          sunHighlightOffsetY={110}
-        />
+        <Animated.View pointerEvents="none" style={{ transform: [{ translateY: sunDriftY }] }}>
+          <SunGlow
+            width={W}
+            height={H}
+            glowAnim={glowAnim}
+            pulseScale={pulseScale}
+            rayOuterHeightFactor={0.72}
+            rayMidHeightFactor={0.58}
+            rayInnerHeightFactor={0.44}
+            rayOuterOpacity={0.38}
+            rayMidOpacity={0.28}
+            rayInnerOpacity={0.42}
+            sunOuterSize={340}
+            sunMidSize={250}
+            sunCoreSize={150}
+            sunHighlightSize={28}
+            sunMidOffset={45}
+            sunCoreOffset={95}
+            sunHighlightOffsetX={116}
+            sunHighlightOffsetY={110}
+          />
+        </Animated.View>
 
         {/* Particles — isolated component, re-renders never bubble up */}
         <ParticleCanvas ref={canvasRef} />
@@ -226,7 +271,7 @@ export default function HomeScreen() {
         <SafeAreaView style={{ flex: 1 }}>
           <View style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", paddingBottom: 72, paddingHorizontal: 36 }}>
             {sunInfo && headline ? (
-              <>
+              <Animated.View style={{ alignItems: "center", opacity: contentOpacity, transform: [{ translateY: contentSlideY }] }}>
                 <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 3, textTransform: "uppercase", marginBottom: 10 }}>
                   {subline ?? "until golden hour"}
                 </Text>
@@ -234,21 +279,22 @@ export default function HomeScreen() {
                   {headline}
                 </Text>
                 {countdown && (
-                  <View style={{
+                  <Animated.View style={{
                     marginTop: 16, backgroundColor: colors.ember,
                     paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22,
+                    transform: [{ scale: countdownBump }],
                   }}>
                     <Text style={{ fontSize: 18, fontWeight: "800", color: "white", letterSpacing: -0.5 }}>
                       {subline ? `${countdown} left` : `in ${countdown}`}
                     </Text>
-                  </View>
+                  </Animated.View>
                 )}
                 <Text style={{ fontSize: 15, color: colors.ash, marginTop: 28, textAlign: "center", lineHeight: 24 }}>
                   {subline
                     ? "The sky is wide open.\nShare the light while it lasts."
                     : "The sky is yours to catch.\nDon\u2019t let it slip away."}
                 </Text>
-              </>
+              </Animated.View>
             ) : sunInfo ? (
               <Text style={{ fontSize: 15, color: colors.ash, textAlign: "center", lineHeight: 24 }}>
                 Pull down to refresh soon — timing will update with the new day.
@@ -258,9 +304,11 @@ export default function HomeScreen() {
                 The next golden hour awaits.
               </Text>
             )}
-            <Text style={{ fontSize: 11, color: colors.mist, marginTop: 56, letterSpacing: 1.5, textTransform: "uppercase" }}>
-              swipe to continue
-            </Text>
+            <Animated.View style={{ marginTop: 56, opacity: swipeOpacity }}>
+              <Text style={{ fontSize: 11, color: colors.mist, letterSpacing: 1.5, textTransform: "uppercase" }}>
+                swipe to continue
+              </Text>
+            </Animated.View>
           </View>
         </SafeAreaView>
       </Animated.View>
