@@ -2,22 +2,25 @@ import { getItem, setItem } from "./storage";
 import { supabase } from "./supabase";
 
 const NICKNAME_KEY = "dusk_nickname";
+export const MAX_NICKNAME_LENGTH = 30;
 
 export async function getLocalNickname(): Promise<string | null> {
   return getItem(NICKNAME_KEY);
 }
 
 export async function setLocalNickname(name: string): Promise<void> {
-  await setItem(NICKNAME_KEY, name.trim());
+  const t = name.trim().slice(0, MAX_NICKNAME_LENGTH);
+  await setItem(NICKNAME_KEY, t);
 }
 
 export async function syncDeviceToSupabase(
   deviceId: string,
   nickname: string
 ): Promise<void> {
-  await supabase
-    .from("devices")
-    .upsert({ device_id: deviceId, nickname: nickname.trim() });
+  await supabase.from("devices").upsert({
+    device_id: deviceId,
+    nickname: nickname.trim().slice(0, MAX_NICKNAME_LENGTH),
+  });
 }
 
 // In-memory nickname cache (short TTL — nicknames rarely change)

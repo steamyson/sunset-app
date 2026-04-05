@@ -2,8 +2,16 @@ import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { getItem, setItem, safeJsonParse } from "./storage";
 import { supabase, setDeviceSession } from "./supabase";
+import { stripExifReencodeToJpeg } from "./imageUploadPrep";
+import { createSignedPhotosViewUrl } from "./photosStorage";
 
 const KEY = "dusk_avatar";
+const GENERIC_ERR = "Something went wrong. Please try again.";
+
+function logAndThrow(scope: string, err: { message?: string } | null) {
+  if (err?.message) console.error(scope, err.message);
+  throw new Error(GENERIC_ERR);
+}
 
 export type AvatarPreset = { type: "preset"; id: string; emoji: string; bg: string };
 export type AvatarPhoto  = { type: "photo"; uri: string };
@@ -71,16 +79,14 @@ export async function syncAvatarToServer(
   if (avatar.type === "preset") {
     value = avatar.id;
   } else {
-    // Unique path per upload (like message photos) — the photos bucket RLS
-    // only allows INSERT, not UPDATE, so upsert on a fixed path fails on
-    // the second upload. A unique filename also naturally cache-busts.
+    const strippedUri = await stripExifReencodeToJpeg(avatar.uri);
     const path = `${deviceId}/avatar_${Date.now()}.jpg`;
     let body: Blob | ArrayBuffer;
     if (Platform.OS === "web") {
-      const response = await fetch(avatar.uri);
+      const response = await fetch(strippedUri);
       body = await response.blob();
     } else {
-      const base64 = await FileSystem.readAsStringAsync(avatar.uri, {
+      const base64 = await FileSystem.readAsStringAsync(strippedUri, {
         encoding: "base64",
       });
       body = base64ToArrayBuffer(base64);
@@ -88,16 +94,15 @@ export async function syncAvatarToServer(
     const { error: uploadError } = await supabase.storage
       .from("photos")
       .upload(path, body, { contentType: "image/jpeg", upsert: false });
-    if (uploadError) throw new Error(uploadError.message);
-    const { data } = supabase.storage.from("photos").getPublicUrl(path);
-    value = `photo:${data.publicUrl}`;
+    if (uploadError) logAndThrow("syncAvatarToServer.upload", uploadError);
+    value = `photo:${path}`;
   }
 
   const { error: updateError } = await supabase
     .from("devices")
     .update({ avatar_preset_id: value })
     .eq("device_id", deviceId);
-  if (updateError) throw new Error(updateError.message);
+  if (updateError) logAndThrow("syncAvatarToServer.update", updateError);
 
   delete avatarCache[deviceId];
 }
@@ -134,7 +139,9 @@ export async function fetchMemberAvatars(
       if (!row.avatar_preset_id) continue;
       let avatar: Avatar;
       if (row.avatar_preset_id.startsWith("photo:")) {
-        avatar = { type: "photo", uri: row.avatar_preset_id.slice(6) };
+        const ref = row.avatar_preset_id.slice(6);
+        const uri = await createSignedPhotosViewUrl(ref);
+        avatar = { type: "photo", uri };
       } else {
         const preset = PRESET_AVATARS.find((p) => p.id === row.avatar_preset_id);
         if (!preset) continue;

@@ -26,11 +26,27 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
  */
 export async function setDeviceSession(deviceId: string): Promise<void> {
   if (!deviceId) return;
-  try {
-    await supabase.rpc("set_device_session", { device_id: deviceId });
-  } catch (error) {
-    console.warn("setDeviceSession failed", error);
+  await supabase.rpc("set_device_session", { device_id: deviceId });
+}
+
+/** Retry with backoff — pooler may not apply session on first request. */
+export async function setDeviceSessionWithRetry(deviceId: string): Promise<void> {
+  if (!deviceId) return;
+  const waits = [400, 800, 1600, 3200];
+  let last: unknown;
+  for (let i = 0; i < waits.length; i++) {
+    try {
+      await setDeviceSession(deviceId);
+      return;
+    } catch (e) {
+      last = e;
+      if (i < waits.length - 1) {
+        await new Promise((r) => setTimeout(r, waits[i]!));
+      }
+    }
   }
+  console.error("setDeviceSession: failed after retries", last);
+  throw last instanceof Error ? last : new Error(String(last));
 }
 
 export type Room = {

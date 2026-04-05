@@ -9,8 +9,7 @@ import { Text } from "../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { router } from "expo-router";
-import { fetchSunsetTime } from "../utils/sunset";
-import { getLocalRoomCodes } from "../utils/rooms";
+import { fetchSunsetTime, nextGoldenHourWindow, type SunsetInfo } from "../utils/sunset";
 import { colors } from "../utils/theme";
 import { SunGlow, useSunGlowAnimation } from "../components/SunGlow";
 
@@ -111,35 +110,47 @@ export default function HomeScreen() {
   const slideAnim   = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const canvasRef   = useRef<ParticleCanvasHandle>(null);
   const navigating  = useRef(false);
-  const hasRoomsRef = useRef(false);
 
-  const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
-  const [sunsetTime,  setSunsetTime]  = useState<Date | null>(null);
-  const [countdown,   setCountdown]   = useState<string | null>(null);
-  const [pastSunset,  setPastSunset]  = useState(false);
+  const [sunInfo, setSunInfo] = useState<SunsetInfo | null>(null);
+  const [headline, setHeadline] = useState<string | null>(null);
+  const [subline, setSubline] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<string | null>(null);
 
-  // Sunset fetch + room check
   useEffect(() => {
     fetchSunsetTime().then((info) => {
       if (!info) return;
-      setSunsetLabel(info.formattedLocal);
-      setSunsetTime(info.sunsetTime);
+      setSunInfo(info);
     });
-    getLocalRoomCodes().then((codes) => { hasRoomsRef.current = codes.length > 0; });
   }, []);
 
-  // Live countdown
   useEffect(() => {
-    if (!sunsetTime) return;
+    if (!sunInfo) return;
+    const info = sunInfo;
     function tick() {
-      const ms = sunsetTime!.getTime() - Date.now();
-      if (ms <= 0) { setPastSunset(true); setCountdown(null); }
-      else         { setPastSunset(false); setCountdown(formatCountdown(ms)); }
+      const now = Date.now();
+      const w = nextGoldenHourWindow(info);
+      const start = w.startsAt.getTime();
+      const end = w.endsAt.getTime();
+      const inside = now >= start && now <= end;
+
+      if (inside) {
+        setHeadline("Golden hour");
+        setSubline("open now");
+        setCountdown(formatCountdown(end - now));
+      } else if (now < start) {
+        setHeadline(w.label === "sunrise" ? "Next sunrise" : "Next sunset");
+        setSubline(null);
+        setCountdown(formatCountdown(start - now));
+      } else {
+        setHeadline(null);
+        setSubline(null);
+        setCountdown(null);
+      }
     }
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [sunsetTime]);
+  }, [sunInfo]);
 
   function flickOff(dx: number, dy: number) {
     if (navigating.current) return;
@@ -152,7 +163,7 @@ export default function HomeScreen() {
       duration: 320,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
-    }).start(() => router.replace(hasRoomsRef.current ? "/(tabs)/chats" : "/"));
+    }).start(() => router.replace("/(tabs)/chats"));
   }
 
   // Pan responder — no setState calls here, so zero re-renders during drag
@@ -214,33 +225,37 @@ export default function HomeScreen() {
         {/* Content */}
         <SafeAreaView style={{ flex: 1 }}>
           <View style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", paddingBottom: 72, paddingHorizontal: 36 }}>
-            {sunsetLabel ? (
+            {sunInfo && headline ? (
               <>
                 <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 3, textTransform: "uppercase", marginBottom: 10 }}>
-                  Today's Sunset
+                  {subline ?? "until golden hour"}
                 </Text>
                 <Text style={{ fontSize: 56, fontWeight: "900", color: colors.charcoal, letterSpacing: -2, lineHeight: 60 }}>
-                  {sunsetLabel}
+                  {headline}
                 </Text>
-                {countdown && !pastSunset && (
+                {countdown && (
                   <View style={{
                     marginTop: 16, backgroundColor: colors.ember,
                     paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22,
                   }}>
                     <Text style={{ fontSize: 18, fontWeight: "800", color: "white", letterSpacing: -0.5 }}>
-                      in {countdown}
+                      {subline ? `${countdown} left` : `in ${countdown}`}
                     </Text>
                   </View>
                 )}
                 <Text style={{ fontSize: 15, color: colors.ash, marginTop: 28, textAlign: "center", lineHeight: 24 }}>
-                  {pastSunset
-                    ? "The golden hour has passed.\nRest up — tomorrow's sky is already waiting."
-                    : "The sky is yours to catch.\nDon't let it slip away."}
+                  {subline
+                    ? "The sky is wide open.\nShare the light while it lasts."
+                    : "The sky is yours to catch.\nDon&apos;t let it slip away."}
                 </Text>
               </>
+            ) : sunInfo ? (
+              <Text style={{ fontSize: 15, color: colors.ash, textAlign: "center", lineHeight: 24 }}>
+                Pull down to refresh soon — timing will update with the new day.
+              </Text>
             ) : (
               <Text style={{ fontSize: 15, color: colors.ash, textAlign: "center", lineHeight: 24 }}>
-                The sunset awaits.
+                The next golden hour awaits.
               </Text>
             )}
             <Text style={{ fontSize: 11, color: colors.mist, marginTop: 56, letterSpacing: 1.5, textTransform: "uppercase" }}>

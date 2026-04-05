@@ -3,6 +3,8 @@
 -- The client fetches the full room (with members) via a direct table query after joining,
 -- which is allowed because the device is now a member and RLS permits the read.
 
+drop function if exists public.join_room_by_code(text, text);
+
 create or replace function public.join_room_by_code(p_code text, p_device_id text)
 returns jsonb
 language plpgsql

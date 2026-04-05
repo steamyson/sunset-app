@@ -6,8 +6,22 @@ import { getItem, setItem, safeJsonParse } from "./storage";
 import { getExpiresAt } from "./sunset";
 import { getDeviceId } from "./device";
 import { base64ToArrayBuffer } from "./encoding";
+import { stripExifReencodeToJpeg } from "./imageUploadPrep";
+import { mapWithSignedPhotoUrls } from "./photosStorage";
 
 const REPORTS_STORAGE_KEY = "dusk_reported_message_ids";
+
+const GENERIC_ERR = "Something went wrong. Please try again.";
+
+function logAndThrow(scope: string, error: { message?: string } | null) {
+  if (error?.message) console.error(scope, error.message);
+  throw new Error(GENERIC_ERR);
+}
+
+/** ~1.1 km precision — stored coordinates are less revealing than raw GPS. */
+function roundStoredCoord(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 // ─── Reported messages cache (60s TTL) ───────────────────────────────────────
 let reportedCache: { ids: string[]; ts: number } | null = null;
@@ -68,7 +82,8 @@ export async function getRoomId(code: string): Promise<string> {
     .select("id")
     .eq("code", key)
     .maybeSingle();
-  if (error || !data) throw new Error(error?.message ?? "Room not found.");
+  if (error) logAndThrow("getRoomId", error);
+  if (!data) throw new Error(GENERIC_ERR);
   roomIdCache.set(key, data.id as string);
   return data.id as string;
 }
@@ -83,6 +98,7 @@ export type Message = {
   lng: number | null;
   filter: string | null;
   adjustments: string | null; // JSON-encoded Adjustments
+  capture_window?: string | null;
 };
 
 const EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -130,16 +146,16 @@ export function thumbUrl(url: string, width = 1080): string {
 }
 
 async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
+  const strippedUri = await stripExifReencodeToJpeg(uri);
   const path = `${deviceId}/${Date.now()}.jpg`;
 
   let body: Blob | ArrayBuffer;
 
   if (Platform.OS === "web") {
-    const response = await fetch(uri);
+    const response = await fetch(strippedUri);
     body = await response.blob();
   } else {
-    // On Android/iOS, fetch() can't read file:// URIs — use FileSystem instead
-    const base64 = await FileSystem.readAsStringAsync(uri, {
+    const base64 = await FileSystem.readAsStringAsync(strippedUri, {
       encoding: "base64",
     });
     body = base64ToArrayBuffer(base64);
@@ -149,10 +165,9 @@ async function uploadPhoto(uri: string, deviceId: string): Promise<string> {
     .from("photos")
     .upload(path, body, { contentType: "image/jpeg", upsert: false });
 
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("uploadPhoto", error);
 
-  const { data } = supabase.storage.from("photos").getPublicUrl(path);
-  return data.publicUrl;
+  return path;
 }
 
 export async function sendPhoto({
@@ -161,12 +176,14 @@ export async function sendPhoto({
   deviceId,
   filter,
   adjustments,
+  captureWindow,
 }: {
   uri: string;
   roomCodes: string[];
   deviceId: string;
   filter?: string;
   adjustments?: object;
+  captureWindow?: "sunrise" | "sunset";
 }) {
   // Parallelize: upload + location + room lookup all at once
   const [photoUrl, location, roomResult] = await Promise.all([
@@ -178,23 +195,27 @@ export async function sendPhoto({
       .in("code", roomCodes),
   ]);
 
-  if (roomResult.error) throw new Error(roomResult.error.message);
+  if (roomResult.error) logAndThrow("sendPhoto.rooms", roomResult.error);
   const rooms = roomResult.data;
   if (!rooms?.length) throw new Error("No matching rooms found.");
+
+  const lat = location?.lat != null ? roundStoredCoord(location.lat) : null;
+  const lng = location?.lng != null ? roundStoredCoord(location.lng) : null;
 
   const { error } = await supabase.from("messages").insert(
     rooms.map((room) => ({
       sender_device_id: deviceId,
       room_id: room.id,
       photo_url: photoUrl,
-      lat: location?.lat ?? null,
-      lng: location?.lng ?? null,
+      lat,
+      lng,
       filter: filter ?? null,
       adjustments: adjustments ? JSON.stringify(adjustments) : null,
+      capture_window: captureWindow ?? null,
     }))
   );
 
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("sendPhoto.insert", error);
 
   // Send push notifications to room members (non-blocking)
   const allMemberIds = [...new Set(rooms.flatMap((r) => r.members as string[]))];
@@ -249,7 +270,7 @@ export async function fetchMessagesWithLocation(opts: {
   }
 
   const { data, error } = await query;
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("fetchMessagesWithLocation", error);
 
   // Deduplicate: same photo sent to multiple rooms → one map pin
   const seen = new Set<string>();
@@ -260,7 +281,7 @@ export async function fetchMessagesWithLocation(opts: {
     deduped.push(msg);
     if (deduped.length >= pageSize) break;
   }
-  return deduped;
+  return mapWithSignedPhotoUrls(deduped);
 }
 
 export async function fetchRoomMessagesByCode(
@@ -282,8 +303,8 @@ export async function fetchRoomMessagesByCode(
     .order("created_at", { ascending: true })
     .range(range.from, range.to);
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Message[];
+  if (error) logAndThrow("fetchRoomMessagesByCode", error);
+  return mapWithSignedPhotoUrls((data ?? []) as Message[]);
 }
 
 export async function fetchAllMyMessages(
@@ -303,7 +324,7 @@ export async function fetchAllMyMessages(
     .order("created_at", { ascending: false })
     .range(range.from, range.to + pageSize);
 
-  if (error) throw new Error(error.message);
+  if (error) logAndThrow("fetchAllMyMessages", error);
 
   // Deduplicate: same photo sent to multiple rooms → keep first (most recent) only
   const seen = new Set<string>();
@@ -314,7 +335,7 @@ export async function fetchAllMyMessages(
     deduped.push(msg);
     if (deduped.length >= pageSize) break;
   }
-  return deduped;
+  return mapWithSignedPhotoUrls(deduped);
 }
 
 // ─── Phase 2.3: ephemeral chat messages with sunset expiry ───────────────────
@@ -382,9 +403,8 @@ export async function sendMessage(params: SendMessageParams): Promise<ChatMessag
     .select("*")
     .single();
 
-  if (error || !data) {
-    throw new Error(error?.message ?? "Failed to send message.");
-  }
+  if (error) logAndThrow("sendMessage", error);
+  if (!data) throw new Error(GENERIC_ERR);
 
   return data as ChatMessage;
 }
@@ -414,8 +434,8 @@ export async function getPhotosForRoom(
     .order("created_at", { ascending: false })
     .range(range.from, range.to);
 
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((row: Record<string, unknown>) => ({
+  if (error) logAndThrow("getPhotosForRoom", error);
+  const rows = (data ?? []).map((row: Record<string, unknown>) => ({
     id: row.id as string,
     room_id: row.room_id as string,
     device_id: row.sender_device_id as string,
@@ -424,5 +444,6 @@ export async function getPhotosForRoom(
     filter: (row.filter as string | null) ?? null,
     adjustments: (row.adjustments as string | null) ?? null,
   }));
+  return mapWithSignedPhotoUrls(rows);
 }
 

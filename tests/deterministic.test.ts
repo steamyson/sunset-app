@@ -1,5 +1,5 @@
 import { getAlias } from "../utils/aliases";
-import { isWithinGoldenHour } from "../utils/sunset";
+import { isWithinGoldenHour, isWithinGoldenHourSunrise } from "../utils/sunset";
 import { roomGlobePos, roomVariant } from "../utils/roomVisuals";
 
 function assert(condition: boolean, message: string): void {
@@ -36,6 +36,18 @@ export function runDeterministicChecks(): void {
 
     Date.now = () => sunset.getTime() - 90 * 60_000 - 1;
     assert(!isWithinGoldenHour(sunset), "Golden hour should exclude pre-window timestamps.");
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const sunrise = new Date("2026-03-25T06:30:00.000Z");
+  try {
+    Date.now = () => sunrise.getTime() - 45 * 60_000;
+    assert(isWithinGoldenHourSunrise(sunrise), "Sunrise window should include exact start boundary.");
+    Date.now = () => sunrise.getTime() + 90 * 60_000;
+    assert(isWithinGoldenHourSunrise(sunrise), "Sunrise window should include exact end boundary.");
+    Date.now = () => sunrise.getTime() - 45 * 60_000 - 1;
+    assert(!isWithinGoldenHourSunrise(sunrise), "Sunrise window should exclude pre-window timestamps.");
   } finally {
     Date.now = originalNow;
   }

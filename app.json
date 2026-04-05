@@ -13,7 +13,8 @@
       "backgroundColor": "#FAF3E8"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.akivagroener.dusk"
     },
     "android": {
       "adaptiveIcon": {

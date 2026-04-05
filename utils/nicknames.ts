@@ -40,6 +40,11 @@ async function load(): Promise<Record<string, string>> {
   return safeJsonParse(raw, {} as Record<string, string>);
 }
 
+/** Picks a default display name for a new room (caller persists locally / on server). */
+export function drawDefaultRoomNickname(): string {
+  return DEFAULT_ROOM_NAMES[Math.floor(Math.random() * DEFAULT_ROOM_NAMES.length)]!;
+}
+
 export async function getRoomNickname(code: string): Promise<string | null> {
   const map = await load();
   return map[code] ?? null;
@@ -58,7 +63,24 @@ export async function getAllNicknames(): Promise<Record<string, string>> {
 export async function assignDefaultRoomNickname(code: string): Promise<void> {
   const map = await load();
   if (map[code]) return; // already has a nickname
-  const name = DEFAULT_ROOM_NAMES[Math.floor(Math.random() * DEFAULT_ROOM_NAMES.length)];
+  const name = drawDefaultRoomNickname();
   map[code] = name;
   await setItem(KEY, JSON.stringify(map));
+}
+
+/** Merge server `rooms.nickname` into local storage so all screens see the shared name. */
+export async function syncLocalNicknamesFromRooms(
+  rooms: { code: string; nickname: string | null }[]
+): Promise<Record<string, string>> {
+  const map = await load();
+  let changed = false;
+  for (const r of rooms) {
+    const t = r.nickname?.trim();
+    if (t && map[r.code] !== t) {
+      map[r.code] = t;
+      changed = true;
+    }
+  }
+  if (changed) await setItem(KEY, JSON.stringify(map));
+  return map;
 }

@@ -13,6 +13,7 @@ import { useState, useRef, useEffect } from "react";
 import { router } from "expo-router";
 import { setLocalNickname, MAX_NICKNAME_LENGTH } from "../utils/identity";
 import { colors, interaction } from "../utils/theme";
+import { waitForIntroFinished } from "../utils/introGate";
 
 export default function SetupScreen() {
   const [name, setName] = useState("");
@@ -24,11 +25,20 @@ export default function SetupScreen() {
   const bloomOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(emojiY, { toValue: 0, tension: 120, friction: 8, useNativeDriver: true }),
-      Animated.spring(emojiOpacity, { toValue: 1, tension: 120, friction: 8, useNativeDriver: true }),
-    ]).start();
-  }, []);
+    let cancelled = false;
+    async function runEntrance() {
+      await waitForIntroFinished();
+      if (cancelled) return;
+      emojiY.setValue(30);
+      emojiOpacity.setValue(0);
+      Animated.parallel([
+        Animated.spring(emojiY, { toValue: 0, tension: 120, friction: 8, useNativeDriver: true }),
+        Animated.spring(emojiOpacity, { toValue: 1, tension: 120, friction: 8, useNativeDriver: true }),
+      ]).start();
+    }
+    void runEntrance();
+    return () => { cancelled = true; };
+  }, [emojiOpacity, emojiY]);
 
   async function handleContinue() {
     const trimmed = name.trim();

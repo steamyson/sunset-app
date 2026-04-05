@@ -3,6 +3,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   TouchableOpacity,
@@ -10,6 +11,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { Text } from "../components/Text";
 import { SkyCloud } from "../components/SkyCloud";
 import { setItem } from "../utils/storage";
@@ -18,6 +20,19 @@ import { colors, spacing } from "../utils/theme";
 const { width: W, height: H } = Dimensions.get("window");
 const BASE_CLOUD_W = W * 0.54;
 const TOTAL_STEPS = 5;
+
+/** SecureStore values are capped at 2048 bytes on Android — picker URIs are often longer. */
+const ONBOARDING_PROFILE_FILE = "onboarding_profile.jpg";
+
+async function persistProfilePick(uri: string): Promise<string> {
+  const dest = `${FileSystem.documentDirectory}${ONBOARDING_PROFILE_FILE}`;
+  const existing = await FileSystem.getInfoAsync(dest);
+  if (existing.exists) {
+    await FileSystem.deleteAsync(dest, { idempotent: true });
+  }
+  await FileSystem.copyAsync({ from: uri, to: dest });
+  return dest;
+}
 
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
@@ -168,7 +183,7 @@ function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
           <Text style={styles.welcomeTitle}>dusk.</Text>
         </Animated.View>
         <Animated.View style={{ opacity: taglineOpacity }}>
-          <Text style={styles.welcomeTagline}>every sunset, once.</Text>
+          <Text style={styles.welcomeTagline}>sunrise and sunset, once each.</Text>
         </Animated.View>
       </View>
       <Text style={styles.tapToContinue}>tap to continue</Text>
@@ -192,30 +207,39 @@ function StepProfile({
   async function pickFromCamera() {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: "images" as const,
-      allowsEditing: true,
+      // Android crop activity after capture is a frequent native crash; iOS editor is stable.
+      allowsEditing: Platform.OS === "ios",
       aspect: [1, 1] as [number, number],
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      const uri = result.assets[0].uri;
-      await setItem("profile_photo_uri", uri);
-      setPhotoUri(uri);
-      setTimeout(onAdvance, 600);
+      try {
+        const stableUri = await persistProfilePick(result.assets[0].uri);
+        await setItem("profile_photo_uri", stableUri);
+        setPhotoUri(stableUri);
+        setTimeout(onAdvance, 600);
+      } catch (e) {
+        console.warn("persistProfilePick", e);
+      }
     }
   }
 
   async function pickFromLibrary() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images" as const,
-      allowsEditing: true,
+      allowsEditing: Platform.OS === "ios",
       aspect: [1, 1] as [number, number],
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      const uri = result.assets[0].uri;
-      await setItem("profile_photo_uri", uri);
-      setPhotoUri(uri);
-      setTimeout(onAdvance, 600);
+      try {
+        const stableUri = await persistProfilePick(result.assets[0].uri);
+        await setItem("profile_photo_uri", stableUri);
+        setPhotoUri(stableUri);
+        setTimeout(onAdvance, 600);
+      } catch (e) {
+        console.warn("persistProfilePick", e);
+      }
     }
   }
 
@@ -273,9 +297,9 @@ function StepClouds({ onAdvance }: { onAdvance: () => void }) {
   return (
     <View style={styles.stepPadded}>
       <View style={styles.cloudStage}>
-        {/* Ghost cloud behind */}
+        {/* Ghost cloud behind — no label so drifting doesn’t reveal duplicate text */}
         <Animated.View style={[styles.ghostCloud, { opacity: ghostOpacity }]}>
-          <SkyCloud variant={2} width={BASE_CLOUD_W} name="another room" hideLabel={false} />
+          <SkyCloud variant={2} width={BASE_CLOUD_W} name="another room" hideLabel />
         </Animated.View>
         {/* Main drifting cloud */}
         <Animated.View style={{ transform: [{ translateX: driftAnim }] }}>
@@ -303,7 +327,7 @@ function StepGoldenHour({ onAdvance }: { onAdvance: () => void }) {
       </View>
       <Text style={styles.countdownLabel}>until golden hour</Text>
       <Text style={[styles.bodyText, { marginTop: spacing.lg }]}>
-        photos only live during golden hour — 90 minutes before to 45 minutes after sunset. then they're gone.
+        photos only live during golden hour — sunrise and sunset. two chances a day. then they&apos;re gone.
       </Text>
       <Text style={styles.tapToContinue}>tap to continue</Text>
     </Pressable>
@@ -453,6 +477,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: spacing.md,
     height: BASE_CLOUD_W * (185 / 240) + 20,
+    overflow: "hidden",
   },
   ghostCloud: {
     position: "absolute",

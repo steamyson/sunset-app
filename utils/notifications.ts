@@ -1,6 +1,10 @@
 import { Platform } from "react-native";
 import { getItem, setItem } from "./storage";
-import { fetchSunsetTime } from "./sunset";
+import {
+  fetchSunsetTime,
+  goldenHourWindowStart,
+  goldenHourWindowStartSunrise,
+} from "./sunset";
 
 const ALERTS_ENABLED_KEY = "dusk_sunset_alerts_enabled";
 const LAST_SCHEDULED_KEY = "dusk_alert_last_scheduled";
@@ -43,10 +47,29 @@ export async function cancelSunsetAlert(): Promise<void> {
   if (!Notifications) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const n of scheduled) {
-    if (n.content.data?.type === "sunset_alert") {
+    const t = n.content.data?.type;
+    if (t === "sunset_alert" || t === "sunrise_alert") {
       await Notifications.cancelScheduledNotificationAsync(n.identifier);
     }
   }
+}
+
+function threeMinutesBeforeWindowOpens(windowStart: Date): Date {
+  return new Date(windowStart.getTime() - 3 * 60_000);
+}
+
+function nextGoldenHourNotificationDate(
+  nowMs: number,
+  eventInstants: Date[],
+  kind: "sunrise" | "sunset"
+): Date | null {
+  for (const instant of eventInstants) {
+    const open =
+      kind === "sunrise" ? goldenHourWindowStartSunrise(instant) : goldenHourWindowStart(instant);
+    const trigger = threeMinutesBeforeWindowOpens(open).getTime();
+    if (trigger > nowMs) return new Date(trigger);
+  }
+  return null;
 }
 
 export async function scheduleSunsetAlert(): Promise<boolean> {
@@ -60,24 +83,38 @@ export async function scheduleSunsetAlert(): Promise<boolean> {
   const lastScheduled = await getItem(LAST_SCHEDULED_KEY);
   if (lastScheduled === todayString()) return true;
 
-  const sunset = await fetchSunsetTime();
-  if (!sunset) return false;
+  const info = await fetchSunsetTime();
+  if (!info) return false;
 
-  const alertTime = new Date(sunset.sunsetTime.getTime() - 3 * 60 * 1000);
+  const nowMs = Date.now();
+  const sunriseAt = nextGoldenHourNotificationDate(nowMs, [info.sunriseTime, info.tomorrowSunriseTime], "sunrise");
+  const sunsetAt = nextGoldenHourNotificationDate(nowMs, [info.sunsetTime, info.tomorrowSunsetTime], "sunset");
 
-  // Don't schedule if alert time has already passed today
-  if (alertTime <= new Date()) return false;
+  if (!sunriseAt && !sunsetAt) return false;
 
   await cancelSunsetAlert();
 
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Sunset Alert!",
-      body: "Go outside and bask in red 🌅",
-      data: { type: "sunset_alert" },
-    },
-    trigger: { type: "date", date: alertTime } as any,
-  });
+  if (sunriseAt) {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Sunrise golden hour",
+        body: "The morning sky is waiting 🌅",
+        data: { type: "sunrise_alert" },
+      },
+      trigger: { type: "date", date: sunriseAt } as any,
+    });
+  }
+
+  if (sunsetAt) {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Sunset golden hour",
+        body: "Go outside and bask in red 🌅",
+        data: { type: "sunset_alert" },
+      },
+      trigger: { type: "date", date: sunsetAt } as any,
+    });
+  }
 
   await setItem(LAST_SCHEDULED_KEY, todayString());
   return true;

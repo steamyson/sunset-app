@@ -8,7 +8,10 @@ function logAndThrow(scope: string, err: { message?: string } | null) {
 }
 import { getDeviceId } from "./device";
 import { getItem, setItem, safeJsonParse } from "./storage";
-import { assignDefaultRoomNickname } from "./nicknames";
+import {
+  drawDefaultRoomNickname,
+  setRoomNickname as setLocalRoomNickname,
+} from "./nicknames";
 import { invalidateRoomCache } from "./roomCache";
 
 const LOCAL_ROOMS_KEY = "dusk_rooms";
@@ -64,16 +67,17 @@ export async function createRoom(): Promise<Room> {
     throw new Error("Unable to generate a unique room code. Please try again.");
   }
 
+  const nickname = drawDefaultRoomNickname();
   const { data, error } = await supabase
     .from("rooms")
-    .insert({ code, host_device_id: deviceId, members: [deviceId] })
+    .insert({ code, host_device_id: deviceId, members: [deviceId], nickname })
     .select()
     .single();
 
   if (error) logAndThrow("createRoom.insert", error);
 
   await addLocalRoomCode(code);
-  await assignDefaultRoomNickname(code);
+  await setLocalRoomNickname(code, nickname);
   invalidateRoomCache();
   return data as Room;
 }
@@ -99,9 +103,31 @@ export async function joinRoom(code: string): Promise<Room> {
   if (fetchError) logAndThrow("joinRoom.fetch", fetchError);
 
   await addLocalRoomCode(upperCode);
-  await assignDefaultRoomNickname(upperCode);
+  let joined = room as Room;
+  const serverNick = joined.nickname?.trim();
+  if (serverNick) {
+    await setLocalRoomNickname(upperCode, serverNick);
+  } else {
+    const proposed = drawDefaultRoomNickname();
+    await setLocalRoomNickname(upperCode, proposed);
+    const { error: upErr } = await supabase
+      .from("rooms")
+      .update({ nickname: proposed })
+      .eq("code", upperCode)
+      .is("nickname", null);
+    if (upErr) console.warn("joinRoom.seedNickname", upErr.message);
+    const { data: refetch, error: refErr } = await supabase
+      .from("rooms")
+      .select("*")
+      .eq("code", upperCode)
+      .single();
+    if (!refErr && refetch) joined = refetch as Room;
+    else joined = { ...joined, nickname: proposed };
+    const canonical = joined.nickname?.trim() ?? proposed;
+    if (canonical !== proposed) await setLocalRoomNickname(upperCode, canonical);
+  }
   invalidateRoomCache();
-  return room as Room;
+  return joined;
 }
 
 export async function fetchMyRooms(): Promise<Room[]> {
@@ -118,8 +144,15 @@ export async function fetchMyRooms(): Promise<Room[]> {
   return (data ?? []) as Room[];
 }
 
-export async function setRoomNickname(code: string, nickname: string) {
-  await supabase.from("rooms").update({ nickname }).eq("code", code);
+/** Updates shared room display name for all members (Supabase + local cache). */
+export async function syncSharedRoomNickname(code: string, nickname: string) {
+  const trimmed = nickname.trim();
+  if (!trimmed) return;
+  const upper = code.trim().toUpperCase();
+  const { error } = await supabase.from("rooms").update({ nickname: trimmed }).eq("code", upper);
+  if (error) logAndThrow("syncSharedRoomNickname", error);
+  await setLocalRoomNickname(upper, trimmed);
+  invalidateRoomCache();
 }
 
 export async function removeLocalRoomCode(code: string): Promise<void> {

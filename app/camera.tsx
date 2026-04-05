@@ -31,7 +31,14 @@ import { recordCapture } from "../utils/storage";
 import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../utils/filters";
 import { getDeviceId } from "../utils/device";
 import { colors, interaction } from "../utils/theme";
-import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../utils/sunset";
+import {
+  fetchSunsetTime,
+  isWithinAnyGoldenHour,
+  nextGoldenHourWindow,
+  activeWindow,
+  formatSunsetTime,
+  UNLOCK_CAMERA_FOR_TESTING,
+} from "../utils/sunset";
 
 const SLIDER_H = 200;
 
@@ -74,8 +81,9 @@ export default function CameraScreen() {
     fetchSunsetTime().then((info) => {
       if (!info) { setGoldenHour("open"); return; }
       setSunsetLabel(info.formattedLocal);
-      setWindowOpensLabel(formatSunsetTime(goldenHourWindowStart(info.sunsetTime)));
-      setGoldenHour(isWithinGoldenHour(info.sunsetTime) ? "open" : "closed");
+      const next = nextGoldenHourWindow(info);
+      setWindowOpensLabel(`${formatSunsetTime(next.startsAt)} · ${next.label}`);
+      setGoldenHour(isWithinAnyGoldenHour(info) ? "open" : "closed");
     });
   }, []);
 
@@ -165,7 +173,16 @@ export default function CameraScreen() {
     setError(null);
     try {
       const deviceId = await getDeviceId();
-      await sendPhoto({ uri: photo, roomCodes, deviceId, filter: activeFilter, adjustments: activeAdjustments });
+      const info = await fetchSunsetTime();
+      const win = info ? activeWindow(info) : null;
+      await sendPhoto({
+        uri: photo,
+        roomCodes,
+        deviceId,
+        filter: activeFilter,
+        adjustments: activeAdjustments,
+        captureWindow: win ?? undefined,
+      });
       recordCapture().catch(() => {});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
@@ -200,12 +217,12 @@ export default function CameraScreen() {
           Not quite golden hour
         </Text>
         <Text style={{ fontSize: 15, color: colors.ash, marginTop: 12, textAlign: "center", lineHeight: 24 }}>
-          Dusk is for sunset photos only. Come back when the sky starts turning.
+          Photos unlock during golden hour at sunrise and sunset. Come back when the next window opens.
         </Text>
         {sunsetLabel && (
           <View style={{ marginTop: 28, backgroundColor: colors.ember, paddingHorizontal: 28, paddingVertical: 16, borderRadius: 20 }}>
             <Text style={{ color: "white", fontWeight: "800", fontSize: 16, textAlign: "center" }}>
-              Today's sunset: {sunsetLabel}
+              Today&apos;s sunset: {sunsetLabel}
             </Text>
             {windowOpensLabel && (
               <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, textAlign: "center", marginTop: 4 }}>

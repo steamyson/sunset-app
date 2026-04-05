@@ -11,6 +11,7 @@ import {
   Dimensions,
   Image,
   Animated,
+  Easing,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
@@ -32,11 +33,11 @@ import { getAuthUser, signInWithEmail, verifyOtp, signOut, signInWithGoogle } fr
 import { getAlias } from "../../utils/aliases";
 import type { User } from "@supabase/supabase-js";
 import { getDeviceId } from "../../utils/device";
-import { fetchSunsetTime } from "../../utils/sunset";
-import { getLocalNickname, setLocalNickname, syncDeviceToSupabase } from "../../utils/identity";
+import { fetchSunsetTime, type SunsetInfo } from "../../utils/sunset";
+import { getLocalNickname, setLocalNickname, syncDeviceToSupabase, MAX_NICKNAME_LENGTH } from "../../utils/identity";
 import { leaveRoom, createRoom } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
-import { getAllNicknames, setRoomNickname } from "../../utils/nicknames";
+import { syncLocalNicknamesFromRooms } from "../../utils/nicknames";
 import {
   getAlertsEnabled,
   setAlertsEnabled,
@@ -92,7 +93,7 @@ export default function ProfileScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomNicknames, setRoomNicknames] = useState<Record<string, string>>({});
   const [alertsEnabled, setAlertsEnabledState] = useState(false);
-  const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
+  const [sunOut, setSunOut] = useState<SunsetInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [togglingAlert, setTogglingAlert] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -118,22 +119,35 @@ export default function ProfileScreen() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (loading) return;
+    contentOpacity.setValue(0);
+    Animated.timing(contentOpacity, {
+      toValue: 1,
+      duration: 300,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [loading, contentOpacity]);
+
   useFocusEffect(
     useCallback(() => {
       async function load() {
-        const [id, nick, enabled, sunset, roomList, nickMap] = await Promise.all([
+        const [id, nick, enabled, sunset, roomList] = await Promise.all([
           getDeviceId(),
           getLocalNickname(),
           getAlertsEnabled(),
           fetchSunsetTime(),
           fetchMyRoomsCached(),
-          getAllNicknames(),
         ]);
+        const nickMap = await syncLocalNicknamesFromRooms(roomList);
         setDeviceId(id);
         setAlias(getAlias(id));
         setNickname(nick ?? "");
         setAlertsEnabledState(enabled);
-        if (sunset) setSunsetLabel(sunset.formattedLocal);
+        if (sunset) setSunOut(sunset);
         setRooms(roomList);
         setRoomNicknames(nickMap);
         const av = await getAvatar();
@@ -245,6 +259,8 @@ export default function ProfileScreen() {
     try {
       const room = await createRoom();
       setRooms((prev) => [room, ...prev]);
+      const nickMap = await syncLocalNicknamesFromRooms([room]);
+      setRoomNicknames(nickMap);
     } catch (e) {
       console.error(e);
     } finally {
@@ -262,7 +278,7 @@ export default function ProfileScreen() {
         setAuthStep("idle");
         invalidateRoomCache();
         const roomList = await fetchMyRoomsCached();
-        const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
+        const nickMap = await syncLocalNicknamesFromRooms(roomList);
         setRooms(roomList);
         setRoomNicknames(nickMap);
       }
@@ -301,7 +317,7 @@ export default function ProfileScreen() {
       if (restored > 0) {
         invalidateRoomCache();
         const roomList = await fetchMyRoomsCached();
-        const nickMap = await (await import("../../utils/nicknames")).getAllNicknames();
+        const nickMap = await syncLocalNicknamesFromRooms(roomList);
         setRooms(roomList);
         setRoomNicknames(nickMap);
         Alert.alert("Rooms restored!", `${restored} room${restored === 1 ? "" : "s"} recovered from your previous device.`);
@@ -333,7 +349,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.sky }}>
+    <Animated.View style={{ flex: 1, opacity: contentOpacity, backgroundColor: colors.sky }}>
 
       <SunGlow
         width={W}
@@ -425,16 +441,21 @@ export default function ProfileScreen() {
         </View>
         </CloudCard>
 
-        {/* Sunset info */}
-        {sunsetLabel && (
+        {/* Today’s sun times */}
+        {sunOut && (
           <CloudCard seed={3} bg={colors.mist}>
           <View style={{ padding: 18, flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Text style={{ fontSize: 32 }}>🌇</Text>
-            <View>
+            <Text style={{ fontSize: 32 }}>☀️</Text>
+            <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 12, color: colors.ash, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>
-                Today's Sunset
+                Today&apos;s Light
               </Text>
-              <Text style={{ fontSize: 24, fontWeight: "800", color: colors.charcoal }}>{sunsetLabel}</Text>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 6 }}>
+                Sunrise {sunOut.formattedSunriseLocal}
+              </Text>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 4 }}>
+                Sunset {sunOut.formattedLocal}
+              </Text>
             </View>
           </View>
           </CloudCard>
@@ -463,7 +484,7 @@ export default function ProfileScreen() {
               No rooms yet — create or join one from the home screen.
             </Text>
           ) : rooms.map((room, i) => {
-            const rNick = roomNicknames[room.code];
+            const rNick = roomNicknames[room.code] ?? room.nickname;
             return (
               <CloudCard key={room.id} seed={i + 1}>
               <TouchableOpacity
@@ -511,11 +532,11 @@ export default function ProfileScreen() {
         <View>
           <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
             <View style={{ flex: 1, marginRight: 16 }}>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Sunset Alerts</Text>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Golden hour alerts</Text>
               <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
                 {Platform.OS === "web"
                   ? "Available on iOS & Android only"
-                  : `Notify me 3 min before sunset${sunsetLabel ? ` (${sunsetLabel})` : ""}`}
+                  : "Notify me 3 min before sunrise and sunset windows"}
               </Text>
             </View>
             {togglingAlert
@@ -676,7 +697,7 @@ export default function ProfileScreen() {
               placeholder="Your name or nickname"
               placeholderTextColor={colors.ash}
               autoFocus
-              maxLength={24}
+              maxLength={MAX_NICKNAME_LENGTH}
               style={{
                 backgroundColor: "white", borderWidth: 1.5, borderColor: colors.mist,
                 borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
@@ -785,6 +806,6 @@ export default function ProfileScreen() {
       </Modal>
 
       </SafeAreaView>
-    </View>
+    </Animated.View>
   );
 }

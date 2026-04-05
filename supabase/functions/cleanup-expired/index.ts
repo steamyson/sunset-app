@@ -13,11 +13,18 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function parsePhotoPath(publicUrl: string): string | null {
+function parsePhotoPath(stored: string): string | null {
+  if (!stored) return null;
   const marker = "/storage/v1/object/public/photos/";
-  const idx = publicUrl.indexOf(marker);
-  if (idx === -1) return null;
-  return publicUrl.slice(idx + marker.length);
+  const idx = stored.indexOf(marker);
+  if (idx !== -1) {
+    return stored.slice(idx + marker.length).split("?")[0];
+  }
+  if (!stored.startsWith("http")) {
+    return stored.split("?")[0];
+  }
+  const m = stored.match(/\/photos\/([^?]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 Deno.serve(async (req) => {

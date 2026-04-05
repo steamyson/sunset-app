@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import { getDeviceId } from "./device";
 import { getLocalRoomCodes, addLocalRoomCode } from "./rooms";
-import { assignDefaultRoomNickname } from "./nicknames";
+import { assignDefaultRoomNickname, setRoomNickname as setLocalRoomNickname } from "./nicknames";
 import * as Linking from "expo-linking";
 import type { User } from "@supabase/supabase-js";
 
@@ -53,7 +53,7 @@ export async function restoreRoomsForUser(userId: string): Promise<number> {
 
   const { data: rooms } = await supabase
     .from("rooms")
-    .select("code")
+    .select("code, nickname")
     .overlaps("members", deviceIds);
 
   if (!rooms?.length) return 0;
@@ -63,7 +63,9 @@ export async function restoreRoomsForUser(userId: string): Promise<number> {
   for (const room of rooms) {
     if (!existingCodes.includes(room.code)) {
       await addLocalRoomCode(room.code);
-      await assignDefaultRoomNickname(room.code);
+      const r = room as { code: string; nickname: string | null };
+      if (r.nickname?.trim()) await setLocalRoomNickname(r.code, r.nickname.trim());
+      else await assignDefaultRoomNickname(r.code);
       restored++;
     }
   }

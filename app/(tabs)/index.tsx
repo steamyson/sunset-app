@@ -8,6 +8,7 @@ import {
   InteractionManager,
   Image,
   Animated,
+  Easing,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Text } from "../../components/Text";
@@ -24,7 +25,7 @@ import {
   type Message,
 } from "../../utils/messages";
 import { fetchMyRoomsCached } from "../../utils/roomCache";
-import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, type SunsetInfo } from "../../utils/sunset";
+import { fetchSunsetTime, nextGoldenHourWindow, type SunsetInfo } from "../../utils/sunset";
 import Svg, { Circle } from "react-native-svg";
 import { getNicknames } from "../../utils/identity";
 import { getDeviceId } from "../../utils/device";
@@ -287,17 +288,7 @@ export default function FeedScreen() {
                   </TouchableOpacity>
                 </View>
               )}
-              {!loading && !loadError && messages.length === 0 && (
-                <View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32 }}>
-                  <Text style={{ fontSize: 64 }}>🌅</Text>
-                  <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
-                    Your feed awaits
-                  </Text>
-                  <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-                    Tap the 📷 button to capture a sunset and share it with your rooms.
-                  </Text>
-                </View>
-              )}
+              {!loading && !loadError && messages.length === 0 && <FeedEmptyState />}
             </View>
           }
           ListFooterComponent={
@@ -333,33 +324,142 @@ export default function FeedScreen() {
   );
 }
 
+/** Global feed (tab) — empty state with spring-in, float, and soft halo (matches in-room empty polish). */
+function FeedEmptyState() {
+  const containerOpacity = useRef(new Animated.Value(0)).current;
+  const emojiFloat = useRef(new Animated.Value(0)).current;
+  const emojiScale = useRef(new Animated.Value(0.86)).current;
+  const haloScale = useRef(new Animated.Value(1)).current;
+  const haloOpacity = useRef(new Animated.Value(0.18)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(containerOpacity, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(emojiScale, {
+        toValue: 1,
+        tension: 120,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(emojiFloat, {
+          toValue: -10,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(emojiFloat, {
+          toValue: 0,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    const haloLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(haloScale, {
+            toValue: 1.14,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(haloOpacity, {
+            toValue: 0.38,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(haloScale, {
+            toValue: 1,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(haloOpacity, {
+            toValue: 0.14,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    floatLoop.start();
+    haloLoop.start();
+    return () => {
+      floatLoop.stop();
+      haloLoop.stop();
+    };
+  }, [containerOpacity, emojiFloat, emojiScale, haloOpacity, haloScale]);
+
+  return (
+    <Animated.View style={{ alignItems: "center", paddingTop: 80, paddingHorizontal: 32, opacity: containerOpacity }}>
+      <View style={{ alignItems: "center", justifyContent: "center", height: 88, marginBottom: 4 }}>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            width: 96,
+            height: 96,
+            borderRadius: 48,
+            backgroundColor: colors.amber,
+            opacity: haloOpacity,
+            transform: [{ scale: haloScale }],
+          }}
+        />
+        <Animated.View style={{ transform: [{ translateY: emojiFloat }, { scale: emojiScale }] }}>
+          <Text style={{ fontSize: 64 }}>🌅</Text>
+        </Animated.View>
+      </View>
+      <Text style={{ fontSize: 20, fontWeight: "700", color: colors.charcoal, marginTop: 20, textAlign: "center" }}>
+        Your feed awaits
+      </Text>
+      <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+        Tap the 📷 button during golden hour and share it with your rooms.
+      </Text>
+    </Animated.View>
+  );
+}
+
 // ─── Golden Hour Countdown Ring ──────────────────────────────────────────────
 const RING_SIZE = 56;
 const RING_STROKE = 4;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-const WINDOW_BEFORE_MS = 90 * 60_000;
-const WINDOW_AFTER_MS = 45 * 60_000;
-const TOTAL_WINDOW_MS = WINDOW_BEFORE_MS + WINDOW_AFTER_MS;
 
 function GoldenHourRing({ sunset }: { sunset: SunsetInfo }) {
   const [progress, setProgress] = useState(0);
   const [isGolden, setIsGolden] = useState(false);
   const [label, setLabel] = useState("");
+  const [emoji, setEmoji] = useState("🌇");
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     function tick() {
       const now = Date.now();
-      const sunsetMs = sunset.sunsetTime.getTime();
-      const windowStart = sunsetMs - WINDOW_BEFORE_MS;
-      const windowEnd = sunsetMs + WINDOW_AFTER_MS;
+      const w = nextGoldenHourWindow(sunset);
+      const windowStart = w.startsAt.getTime();
+      const windowEnd = w.endsAt.getTime();
+      const totalMs = windowEnd - windowStart;
       const golden = now >= windowStart && now <= windowEnd;
       setIsGolden(golden);
+      setEmoji(w.label === "sunrise" ? "🌅" : "🌇");
 
       if (golden) {
         const elapsed = now - windowStart;
-        setProgress(Math.min(1, elapsed / TOTAL_WINDOW_MS));
+        setProgress(Math.min(1, totalMs > 0 ? elapsed / totalMs : 1));
         const remaining = windowEnd - now;
         const mins = Math.ceil(remaining / 60_000);
         setLabel(mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
@@ -370,7 +470,7 @@ function GoldenHourRing({ sunset }: { sunset: SunsetInfo }) {
         setLabel(mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
       } else {
         setProgress(1);
-        setLabel("done");
+        setLabel("…");
       }
     }
     tick();
@@ -413,7 +513,7 @@ function GoldenHourRing({ sunset }: { sunset: SunsetInfo }) {
             rotation="-90" origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
           />
         </Svg>
-        <Text style={{ fontSize: 18 }}>{isGolden ? "🌅" : "🌇"}</Text>
+        <Text style={{ fontSize: 18 }}>{emoji}</Text>
       </View>
       <Text style={{ fontSize: 10, fontWeight: "700", color: isGolden ? colors.ember : colors.ash, marginTop: 2 }}>
         {label}

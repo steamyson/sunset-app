@@ -7,7 +7,7 @@ import { useFonts } from "expo-font";
 import { Caveat_400Regular, Caveat_700Bold } from "@expo-google-fonts/caveat";
 import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
-import { getItem } from "../utils/storage";
+import { getItem, setItem } from "../utils/storage";
 import { getDeviceId } from "../utils/device";
 import { setDeviceSessionWithRetry } from "../utils/supabase";
 import { registerPushToken } from "../utils/push";
@@ -15,6 +15,12 @@ import { getAuthUser, linkDeviceToUser } from "../utils/auth";
 import { SunriseIntro } from "../components/SunriseIntro";
 import { markIntroFinished } from "../utils/introGate";
 import { joinRoom } from "../utils/rooms";
+
+/**
+ * When `true` (only in dev), onboarding is shown on every cold start so you can re-test the flow.
+ * Set the right-hand side to `false` when you want normal “complete once” behavior while developing.
+ */
+const FORCE_ONBOARDING_UX_PREVIEW = __DEV__ && true;
 
 function extractRoomCode(url: string): string | null {
   const parsed = Linking.parse(url);
@@ -47,6 +53,9 @@ export default function RootLayout() {
 
     async function init() {
       await initNotifications();
+      if (FORCE_ONBOARDING_UX_PREVIEW) {
+        await setItem("onboarding_complete", "");
+      }
       const [nickname, deviceId] = await Promise.all([getLocalNickname(), getDeviceId()]);
       if (deviceId) {
         setDeviceSessionWithRetry(deviceId).catch((err) => {

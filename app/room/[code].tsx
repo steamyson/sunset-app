@@ -12,13 +12,14 @@ import {
   Easing,
   FlatList,
   Image,
+  ScrollView,
   BackHandler,
   InteractionManager,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../utils/messages";
 import { getAlias } from "../../utils/aliases";
@@ -41,6 +42,7 @@ import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../../ut
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { supabase } from "../../utils/supabase";
+import { createSignedPhotosViewUrl } from "../../utils/photosStorage";
 import { createPost, getPostsForRoom, type Post } from "../../utils/posts";
 import { getCache, clearCache } from "../../utils/roomCache";
 import { MessageOverlay, type VisibleMessage } from "../../components/MessageOverlay";
@@ -48,7 +50,14 @@ import { ChatInputBar } from "../../components/ChatInputBar";
 import { sendMessage, type ChatMessage } from "../../utils/messages";
 import * as Location from "expo-location";
 import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../../utils/cameraFlow";
-import { fetchSunsetTime, isWithinGoldenHour, goldenHourWindowStart, formatSunsetTime, UNLOCK_CAMERA_FOR_TESTING } from "../../utils/sunset";
+import {
+  fetchSunsetTime,
+  isWithinAnyGoldenHour,
+  nextGoldenHourWindow,
+  formatSunsetTime,
+  UNLOCK_CAMERA_FOR_TESTING,
+} from "../../utils/sunset";
+import { fetchMemberAvatars, DEFAULT_AVATAR, type Avatar } from "../../utils/avatar";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -126,6 +135,9 @@ export default function RoomThread() {
   const [nickname, setNickname] = useState<string | null>(params.name || null);
   const [myDeviceId, setMyDeviceId] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
+  const [roomMembers, setRoomMembers] = useState<string[]>([]);
+  const [memberDisplayNames, setMemberDisplayNames] = useState<Record<string, string>>({});
+  const [memberAvatarsMap, setMemberAvatarsMap] = useState<Record<string, Avatar>>({});
   const [reactions, setReactions] = useState<ReactionMap>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -267,6 +279,34 @@ export default function RoomThread() {
     const map: Record<string, boolean> = safeJsonParse(raw, {} as Record<string, boolean>);
     map[roomCode] = false;
     await setItem(UNREAD_PHOTOS_KEY, JSON.stringify(map));
+  }
+
+  async function hydrateRoomMeta() {
+    const upper = code.toUpperCase();
+    const snapshotCode = code;
+    const [localNick, roomRes] = await Promise.all([
+      getRoomNickname(code),
+      supabase.from("rooms").select("members, nickname").eq("code", upper).maybeSingle(),
+    ]);
+    if (loadedCodeRef.current !== snapshotCode) return;
+    const row = roomRes.data;
+    const members = (row?.members as string[] | undefined) ?? [];
+    setRoomMembers(members);
+    const serverNick = row?.nickname?.trim();
+    const displayNick = serverNick || localNick;
+    if (displayNick) setNickname(displayNick);
+    if (members.length === 0) {
+      setMemberDisplayNames({});
+      setMemberAvatarsMap({});
+      return;
+    }
+    const [names, avatars] = await Promise.all([
+      getNicknames(members),
+      fetchMemberAvatars(members),
+    ]);
+    if (loadedCodeRef.current !== snapshotCode) return;
+    setMemberDisplayNames(names);
+    setMemberAvatarsMap(avatars);
   }
 
   function resetCamera() {
@@ -513,15 +553,71 @@ export default function RoomThread() {
         setLoading(true);
         setFeedLoading(true);
         loadedCodeRef.current = code;
+        setRoomMembers([]);
+        setMemberDisplayNames({});
+        setMemberAvatarsMap({});
       }
       setChatHasMore(true);
       setFeedHasMore(true);
       loadMessages(true);
       loadFeed(true);
+      void hydrateRoomMeta();
       const handle = InteractionManager.runAfterInteractions(() => setParticlesReady(true));
       return () => { handle.cancel(); setParticlesReady(false); };
     }, [code])
   );
+
+  // Keep member strip in sync when someone joins / host updates members
+  useEffect(() => {
+    if (!overlayRoomId) return;
+    const filter = `id=eq.${overlayRoomId}`;
+    const channel = supabase
+      .channel(`room-meta-${overlayRoomId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "rooms", filter },
+        (payload: { new: { members?: string[]; nickname?: string | null } }) => {
+          const row = payload.new;
+          if (!row) return;
+          if (row.nickname?.trim()) setNickname(row.nickname.trim());
+          const nextMembers = row.members;
+          if (!nextMembers) return;
+          setRoomMembers(nextMembers);
+          if (nextMembers.length === 0) {
+            setMemberDisplayNames({});
+            setMemberAvatarsMap({});
+            return;
+          }
+          void (async () => {
+            const [names, avatars] = await Promise.all([
+              getNicknames(nextMembers),
+              fetchMemberAvatars(nextMembers),
+            ]);
+            if (loadedCodeRef.current !== code) return;
+            setMemberDisplayNames(names);
+            setMemberAvatarsMap(avatars);
+          })();
+        }
+      )
+      .subscribe((status, err) => {
+        if (err) console.error("realtime room-meta error:", err);
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, [overlayRoomId, code]);
+
+  const sortedMemberIds = useMemo(() => {
+    const ids = [...roomMembers];
+    if (!myDeviceId) {
+      return ids.sort((a, b) =>
+        (memberDisplayNames[a] ?? getAlias(a)).localeCompare(memberDisplayNames[b] ?? getAlias(b))
+      );
+    }
+    return ids.sort((a, b) => {
+      if (a === myDeviceId) return -1;
+      if (b === myDeviceId) return 1;
+      return (memberDisplayNames[a] ?? getAlias(a)).localeCompare(memberDisplayNames[b] ?? getAlias(b));
+    });
+  }, [roomMembers, memberDisplayNames, myDeviceId]);
 
   function handleReactionUpdate(messageId: string, emoji: string, added: boolean) {
     setReactions((prev) => {
@@ -574,38 +670,42 @@ export default function RoomThread() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${overlayRoomId}` },
         (payload: { new: Record<string, unknown> }) => {
-          const row = payload.new;
-          if (!row || !row.id) return;
-          const senderId = (row.sender_device_id ?? row.device_id ?? "") as string;
-          if (senderId === myDeviceId) return;
+          void (async () => {
+            const row = payload.new;
+            if (!row || !row.id) return;
+            if ((row.room_id as string) !== overlayRoomId) return;
+            const senderId = (row.sender_device_id ?? row.device_id ?? "") as string;
+            if (senderId === myDeviceId) return;
 
-          const photoUrl = (row.photo_url ?? "") as string;
-          if (photoUrl.length > 0) {
-            const item: FeedPhoto = {
-              id: row.id as string,
-              room_id: row.room_id as string,
-              device_id: senderId,
-              photo_url: photoUrl,
-              created_at: row.created_at as string,
-              filter: (row.filter as string | null) ?? null,
-              adjustments: (row.adjustments as string | null) ?? null,
-            };
-            setPosts((prev) => {
-              if (prev.some((p) => p.id === item.id)) return prev;
-              return [item, ...prev];
-            });
-          }
+            const photoUrl = (row.photo_url ?? "") as string;
+            if (photoUrl.length > 0) {
+              const displayUrl = await createSignedPhotosViewUrl(photoUrl);
+              const item: FeedPhoto = {
+                id: row.id as string,
+                room_id: row.room_id as string,
+                device_id: senderId,
+                photo_url: displayUrl,
+                created_at: row.created_at as string,
+                filter: (row.filter as string | null) ?? null,
+                adjustments: (row.adjustments as string | null) ?? null,
+              };
+              setPosts((prev) => {
+                if (prev.some((p) => p.id === item.id)) return prev;
+                return [item, ...prev];
+              });
+            }
 
-          const body = (row.body ?? "") as string;
-          if (body.length > 0) {
-            const base: VisibleMessage = {
-              id: row.id as string,
-              body,
-              isPreset: (row.is_preset as boolean) ?? false,
-              presetKey: (row.preset_key as string | null) ?? undefined,
-            };
-            setVisibleMessages((prev) => [...prev.slice(-5), base]);
-          }
+            const body = (row.body ?? "") as string;
+            if (body.length > 0) {
+              const base: VisibleMessage = {
+                id: row.id as string,
+                body,
+                isPreset: (row.is_preset as boolean) ?? false,
+                presetKey: (row.preset_key as string | null) ?? undefined,
+              };
+              setVisibleMessages((prev) => [...prev.slice(-5), base]);
+            }
+          })();
         }
       )
       .subscribe((status, err) => {
@@ -755,6 +855,39 @@ export default function RoomThread() {
         </TouchableOpacity>
       </View>
 
+      {roomMembers.length > 0 && (
+        <View style={{
+          borderBottomWidth: 1,
+          borderBottomColor: colors.mist,
+          paddingTop: 4,
+          paddingBottom: 14,
+        }}>
+          <Text style={{
+            fontSize: 11,
+            fontWeight: "800",
+            color: colors.ash,
+            letterSpacing: 1.2,
+            paddingHorizontal: 20,
+            marginBottom: 10,
+          }}>
+            In this room
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 20, gap: 14, alignItems: "flex-start" }}
+          >
+            {sortedMemberIds.map((mid) => (
+              <RoomMemberChip
+                key={mid}
+                label={mid === myDeviceId ? "You" : (memberDisplayNames[mid] ?? getAlias(mid))}
+                avatar={memberAvatarsMap[mid] ?? DEFAULT_AVATAR}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : loadError ? (
@@ -777,15 +910,7 @@ export default function RoomThread() {
           </TouchableOpacity>
         </View>
       ) : messages.length === 0 ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
-          <Text style={{ fontSize: 52 }}>🌄</Text>
-          <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
-            No sunsets yet
-          </Text>
-          <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-            Be the first to share a sunset here — tap the 📷 button to capture one.
-          </Text>
-        </View>
+        <EmptyRoomFeedState />
       ) : (
         <FlatList
           data={messages}
@@ -841,10 +966,11 @@ export default function RoomThread() {
         onPress={async () => {
           if (!UNLOCK_CAMERA_FOR_TESTING) {
             const info = await fetchSunsetTime();
-            if (info && !isWithinGoldenHour(info.sunsetTime)) {
+            if (info && !isWithinAnyGoldenHour(info)) {
+              const next = nextGoldenHourWindow(info);
               Alert.alert(
                 "Not quite golden hour",
-                `Today's sunset is at ${info.formattedLocal}. Camera unlocks at ${formatSunsetTime(goldenHourWindowStart(info.sunsetTime))}.`
+                `Next window: ${next.label} at ${formatSunsetTime(next.startsAt)}.`
               );
               return;
             }
@@ -978,6 +1104,173 @@ export default function RoomThread() {
     </Modal>
 
     </ParticleTrail>
+  );
+}
+
+const MEMBER_AVATAR_SIZE = 44;
+
+/** Empty photo feed — spring-in + gentle float and halo so the room doesn’t feel dead. */
+function EmptyRoomFeedState() {
+  const containerOpacity = useRef(new Animated.Value(0)).current;
+  const emojiFloat = useRef(new Animated.Value(0)).current;
+  const emojiScale = useRef(new Animated.Value(0.86)).current;
+  const haloScale = useRef(new Animated.Value(1)).current;
+  const haloOpacity = useRef(new Animated.Value(0.18)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(containerOpacity, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(emojiScale, {
+        toValue: 1,
+        tension: 120,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(emojiFloat, {
+          toValue: -10,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(emojiFloat, {
+          toValue: 0,
+          duration: 2400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    const haloLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(haloScale, {
+            toValue: 1.14,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(haloOpacity, {
+            toValue: 0.38,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(haloScale, {
+            toValue: 1,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(haloOpacity, {
+            toValue: 0.14,
+            duration: 2800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    floatLoop.start();
+    haloLoop.start();
+    return () => {
+      floatLoop.stop();
+      haloLoop.stop();
+    };
+  }, [containerOpacity, emojiFloat, emojiScale, haloOpacity, haloScale]);
+
+  return (
+    <Animated.View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 32,
+        paddingBottom: 80,
+        opacity: containerOpacity,
+      }}
+    >
+      <View style={{ alignItems: "center", justifyContent: "center", height: 88, marginBottom: 4 }}>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            width: 96,
+            height: 96,
+            borderRadius: 48,
+            backgroundColor: colors.amber,
+            opacity: haloOpacity,
+            transform: [{ scale: haloScale }],
+          }}
+        />
+        <Animated.View style={{ transform: [{ translateY: emojiFloat }, { scale: emojiScale }] }}>
+          <Text style={{ fontSize: 56 }}>🌄</Text>
+        </Animated.View>
+      </View>
+      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
+        No sunsets yet
+      </Text>
+      <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
+        Be the first to share a sunset here — tap the 📷 button to capture one.
+      </Text>
+    </Animated.View>
+  );
+}
+
+function RoomAvatarDisc({ avatar, size }: { avatar: Avatar; size: number }) {
+  const r = size / 2;
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: r,
+        backgroundColor: avatar.type === "preset" ? avatar.bg : colors.mist,
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        borderWidth: 2,
+        borderColor: colors.cream,
+      }}
+    >
+      {avatar.type === "preset" ? (
+        <Text style={{ fontSize: size * 0.42, lineHeight: Math.round(size * 0.48) }}>{avatar.emoji}</Text>
+      ) : (
+        <Image source={{ uri: avatar.uri }} style={{ width: size, height: size }} resizeMode="cover" />
+      )}
+    </View>
+  );
+}
+
+function RoomMemberChip({ label, avatar }: { label: string; avatar: Avatar }) {
+  const w = MEMBER_AVATAR_SIZE + 28;
+  return (
+    <View style={{ alignItems: "center", width: w }}>
+      <RoomAvatarDisc avatar={avatar} size={MEMBER_AVATAR_SIZE} />
+      <Text
+        numberOfLines={1}
+        style={{
+          fontSize: 12,
+          fontWeight: "700",
+          color: colors.charcoal,
+          marginTop: 6,
+          maxWidth: w,
+          textAlign: "center",
+        }}
+      >
+        {label}
+      </Text>
+    </View>
   );
 }
 
