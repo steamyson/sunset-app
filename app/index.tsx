@@ -8,7 +8,6 @@ import {
   Alert,
   Share,
   Modal,
-  Pressable,
   Dimensions,
 } from "react-native";
 const { width: W, height: H } = Dimensions.get("window");
@@ -16,7 +15,7 @@ import { Text } from "../components/Text";
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { createRoom, joinRoom } from "../utils/rooms";
+import { createRoom, joinRoom, syncSharedRoomNickname } from "../utils/rooms";
 import { getLocalNickname, syncDeviceToSupabase } from "../utils/identity";
 import { getDeviceId } from "../utils/device";
 import { colors, interaction } from "../utils/theme";
@@ -33,7 +32,14 @@ export default function EntryScreen() {
   const [loading, setLoading] = useState<"create" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
+  const [newCloudName, setNewCloudName] = useState("");
   const { glowAnim, pulseScale } = useSunGlowAnimation();
+
+  function finishEntryAfterCreate() {
+    setCreatedCode(null);
+    setNewCloudName("");
+    router.replace("/(tabs)");
+  }
 
   async function handleCreate() {
     setError(null);
@@ -41,6 +47,7 @@ export default function EntryScreen() {
     try {
       const [room] = await Promise.all([createRoom(), syncIdentity()]);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setNewCloudName("");
       setCreatedCode(room.code);
     } catch (e: any) {
       setError(e.message ?? "Something went wrong.");
@@ -223,118 +230,71 @@ export default function EntryScreen() {
       </View>
       </KeyboardAvoidingView>
 
-      {/* Share modal — appears after room creation */}
+      {/* Room created — same pattern as Profile / Chats (name, code below) */}
       <Modal
         visible={createdCode !== null}
         transparent
-        animationType="fade"
-        onRequestClose={() => {}}
+        animationType="slide"
+        onRequestClose={finishEntryAfterCreate}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(61,46,46,0.55)",
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 28,
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: colors.cream,
-              borderRadius: 28,
-              padding: 32,
-              width: "100%",
-              alignItems: "center",
-            }}
-          >
-            <Text
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.4)" }}
+            activeOpacity={1}
+            onPress={finishEntryAfterCreate}
+          />
+          <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
+            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
+            <TextInput
+              value={newCloudName}
+              onChangeText={setNewCloudName}
+              placeholder="name this cloud"
+              placeholderTextColor={colors.ash}
+              autoCorrect={false}
+              autoFocus
               style={{
-                fontSize: 13,
-                color: colors.ash,
-                letterSpacing: 2,
-                textTransform: "uppercase",
-                marginBottom: 12,
+                backgroundColor: "white", borderWidth: 2,
+                borderColor: newCloudName.length > 0 ? colors.ember : colors.mist,
+                borderRadius: 16, paddingHorizontal: 20, paddingVertical: 18,
+                fontSize: 24, color: colors.charcoal, textAlign: "center", marginBottom: 12,
               }}
-            >
-              your room code
-            </Text>
-
-            {/* Code display */}
-            <View
-              style={{
-                backgroundColor: colors.sky,
-                borderRadius: 16,
-                paddingVertical: 18,
-                paddingHorizontal: 28,
-                marginBottom: 24,
-                width: "100%",
-                alignItems: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 42,
-                  fontWeight: "900",
-                  color: colors.charcoal,
-                  letterSpacing: 10,
-                }}
-              >
-                {createdCode}
-              </Text>
+            />
+            <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+              <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{createdCode}</Text>
             </View>
-
-            <Text
-              style={{
-                fontSize: 14,
-                color: colors.ash,
-                textAlign: "center",
-                marginBottom: 28,
-                lineHeight: 20,
-              }}
-            >
-              Share this code with friends so they can join your room.
-            </Text>
-
-            {/* Share button */}
+            {newCloudName.trim().length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  const name = newCloudName.trim();
+                  const code = createdCode!;
+                  void (async () => {
+                    try {
+                      await syncSharedRoomNickname(code, name);
+                      finishEntryAfterCreate();
+                    } catch (e) {
+                      console.error(e);
+                      Alert.alert("Could not save", "Please try again.");
+                    }
+                  })();
+                }}
+                activeOpacity={interaction.activeOpacitySubtle}
+                style={{ backgroundColor: colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
+              >
+                <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Save Name</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={handleShare}
-              activeOpacity={interaction.activeOpacitySubtle}
-              style={{
-                backgroundColor: colors.ember,
-                borderRadius: 16,
-                paddingVertical: 18,
-                width: "100%",
-                alignItems: "center",
-                marginBottom: 12,
-              }}
+              style={{ backgroundColor: newCloudName.trim().length > 0 ? colors.sky : colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
             >
-              <Text
-                style={{
-                  fontSize: 17,
-                  fontWeight: "800",
-                  color: colors.cream,
-                  letterSpacing: -0.3,
-                }}
-              >
-                Share Code
-              </Text>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: newCloudName.trim().length > 0 ? colors.charcoal : colors.cream }}>Share Code</Text>
             </TouchableOpacity>
-
-            {/* Continue without sharing */}
-            <Pressable
-              onPress={() => {
-                setCreatedCode(null);
-                router.replace("/(tabs)");
-              }}
-              style={{ paddingVertical: 12 }}
-            >
-              <Text style={{ fontSize: 14, color: colors.ash }}>
-                Continue without sharing
-              </Text>
-            </Pressable>
+            <TouchableOpacity onPress={finishEntryAfterCreate} style={{ paddingVertical: 12, alignItems: "center" }}>
+              <Text style={{ fontSize: 14, color: colors.ash }}>Done</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

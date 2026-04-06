@@ -54,8 +54,14 @@ export const WINDOW_BEFORE_MS = SUNSET_WINDOW_BEFORE_MS;
 /** @deprecated Use `SUNSET_*` */
 export const WINDOW_AFTER_MS = SUNSET_WINDOW_AFTER_MS;
 
-/** Set to `false` before release — skips golden-hour gate on the main camera screen only. */
-export const UNLOCK_CAMERA_FOR_TESTING = true;
+/**
+ * Skips the golden-hour gate on the camera (see `app/camera.tsx`, room capture).
+ * Enabled for EAS `preview` via `eas.json`; optional locally with
+ * `EXPO_PUBLIC_UNLOCK_CAMERA_FOR_TESTING=true` in `.env.local`.
+ * Must stay off for production / store builds.
+ */
+export const UNLOCK_CAMERA_FOR_TESTING =
+  (process.env.EXPO_PUBLIC_UNLOCK_CAMERA_FOR_TESTING ?? "").trim().toLowerCase() === "true";
 
 function boundsForLabel(label: GoldenWindowLabel, eventTime: Date): GoldenHourWindow {
   const t = eventTime.getTime();

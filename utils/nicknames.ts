@@ -60,6 +60,11 @@ export async function getAllNicknames(): Promise<Record<string, string>> {
   return load();
 }
 
+/** Clear per-room display names (e.g. after account deletion). */
+export async function clearAllRoomNicknames(): Promise<void> {
+  await setItem(KEY, "{}");
+}
+
 export async function assignDefaultRoomNickname(code: string): Promise<void> {
   const map = await load();
   if (map[code]) return; // already has a nickname

@@ -155,6 +155,12 @@ export async function syncSharedRoomNickname(code: string, nickname: string) {
   invalidateRoomCache();
 }
 
+/** Clear saved room codes on device (e.g. after account deletion). */
+export async function clearAllLocalRooms(): Promise<void> {
+  invalidateLocalCodesCache();
+  await setItem(LOCAL_ROOMS_KEY, JSON.stringify([]));
+}
+
 export async function removeLocalRoomCode(code: string): Promise<void> {
   const codes = await getLocalRoomCodes();
   invalidateLocalCodesCache();

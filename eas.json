@@ -14,8 +14,16 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_UNLOCK_CAMERA_FOR_TESTING": "true",
+        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://steamyson.github.io/sunset-app/"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://steamyson.github.io/sunset-app/"
+      }
+    }
   }
 }

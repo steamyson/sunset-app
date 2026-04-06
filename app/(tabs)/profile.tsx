@@ -16,6 +16,7 @@ import {
   Share,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as Linking from "expo-linking";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,7 +32,14 @@ import {
 
 import { useFocusEffect, useRouter } from "expo-router";
 import { getStreak } from "../../utils/storage";
-import { getAuthUser, signInWithEmail, verifyOtp, signOut, signInWithGoogle } from "../../utils/auth";
+import {
+  getAuthUser,
+  signInWithEmail,
+  verifyOtp,
+  signOut,
+  signInWithGoogle,
+  deleteAccountAndEraseData,
+} from "../../utils/auth";
 import { getAlias } from "../../utils/aliases";
 import type { User } from "@supabase/supabase-js";
 import { getDeviceId } from "../../utils/device";
@@ -53,6 +61,8 @@ import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import { CropView } from "../../components/CropView";
 
 import type { Room } from "../../utils/supabase";
+
+const PRIVACY_POLICY_URL = (process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL ?? "").trim();
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -124,6 +134,7 @@ export default function ProfileScreen() {
   const [authToken, setAuthToken] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const contentOpacity = useRef(new Animated.Value(0)).current;
 
@@ -307,6 +318,15 @@ export default function ProfileScreen() {
     setNewCloudName("");
   }
 
+  async function openPrivacyPolicy() {
+    if (!PRIVACY_POLICY_URL) return;
+    try {
+      await Linking.openURL(PRIVACY_POLICY_URL);
+    } catch {
+      Alert.alert("Could not open link", "Please try again or visit our website.");
+    }
+  }
+
   async function handleGoogleSignIn() {
     setAuthError(null);
     setAuthLoading(true);
@@ -381,6 +401,39 @@ export default function ProfileScreen() {
         },
       },
     ]);
+  }
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      "Delete account?",
+      "This permanently deletes your login and removes your photos, messages, and server nickname for devices linked to this account. Local room shortcuts on this phone are cleared. You can keep using Dusk without signing in.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete account",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setDeletingAccount(true);
+              try {
+                await deleteAccountAndEraseData();
+                setAuthUser(null);
+                setAuthStep("idle");
+                setRooms([]);
+                setRoomNicknames({});
+                await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                Alert.alert("Account deleted", "Your account and associated server data have been removed.");
+              } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : "Something went wrong.";
+                Alert.alert("Could not delete account", msg);
+              } finally {
+                setDeletingAccount(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
   }
 
   if (loading) {
@@ -604,6 +657,26 @@ export default function ProfileScreen() {
               Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
             </Text>
           </View>
+
+          {PRIVACY_POLICY_URL ? (
+            <>
+              <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+              <TouchableOpacity
+                onPress={openPrivacyPolicy}
+                activeOpacity={interaction.activeOpacity}
+                style={{
+                  paddingVertical: 18,
+                  paddingHorizontal: 20,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
+                <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
         </View>
         </CloudCard>
 
@@ -626,8 +699,19 @@ export default function ProfileScreen() {
               <Text style={{ fontSize: 13, color: colors.ash, lineHeight: 18, marginBottom: 16 }}>
                 Your rooms are safe. Sign in with this email on a new device to restore everything.
               </Text>
-              <TouchableOpacity onPress={handleSignOut} style={{ alignSelf: "flex-start" }}>
+              <TouchableOpacity onPress={handleSignOut} style={{ alignSelf: "flex-start" }} disabled={deletingAccount}>
                 <Text style={{ fontSize: 13, fontWeight: "700", color: colors.magenta }}>Sign Out</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDeleteAccount}
+                disabled={deletingAccount}
+                style={{ alignSelf: "flex-start", marginTop: 14, flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                {deletingAccount ? (
+                  <ActivityIndicator color={colors.magenta} size="small" />
+                ) : (
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: colors.magenta }}>Delete account</Text>
+                )}
               </TouchableOpacity>
             </>
           ) : authStep === "otp" ? (

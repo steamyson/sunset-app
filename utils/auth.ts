@@ -1,7 +1,16 @@
 import { supabase } from "./supabase";
 import { getDeviceId } from "./device";
-import { getLocalRoomCodes, addLocalRoomCode } from "./rooms";
-import { assignDefaultRoomNickname, setRoomNickname as setLocalRoomNickname } from "./nicknames";
+import { getLocalRoomCodes, addLocalRoomCode, clearAllLocalRooms } from "./rooms";
+import {
+  assignDefaultRoomNickname,
+  setRoomNickname as setLocalRoomNickname,
+  clearAllRoomNicknames,
+} from "./nicknames";
+import { invalidateRoomCache } from "./roomCache";
+import { clearReportedCache } from "./messages";
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
 import * as Linking from "expo-linking";
 import type { User } from "@supabase/supabase-js";
 
@@ -115,4 +124,41 @@ export async function signInWithGoogle(): Promise<User | null> {
 
 export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
+}
+
+/**
+ * Apple / GDPR-style account deletion: server RPC erases linked device data, then Auth user is removed.
+ * Requires Supabase Auth to allow user self-deletion (Dashboard → Authentication → Users, or API settings).
+ */
+export async function deleteAccountAndEraseData(): Promise<void> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token || !session.user) {
+    throw new Error("You need to be signed in to delete your account.");
+  }
+
+  const { error: rpcError } = await supabase.rpc("erase_linked_account_data");
+  if (rpcError) throw new Error(rpcError.message);
+
+  const res = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_ANON_KEY,
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      text || `Could not delete login (${res.status}). Enable user self-deletion in Supabase Auth or try again.`
+    );
+  }
+
+  await supabase.auth.signOut({ scope: "global" });
+  await clearAllLocalRooms();
+  await clearAllRoomNicknames();
+  invalidateRoomCache();
+  clearReportedCache();
 }
