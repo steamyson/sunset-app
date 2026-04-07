@@ -1,11 +1,12 @@
 -- Account deletion (Apple Guideline 5.1.1): wipe data for all devices linked to auth.uid(),
 -- then client removes the Auth user via DELETE /auth/v1/user.
+-- Storage files: removed via Storage API (see get_linked_account_storage_paths + client). SQL DELETE on storage.objects is not allowed on Supabase.
 
 create or replace function public.erase_linked_account_data()
 returns void
 language plpgsql
 security definer
-set search_path = public, storage
+set search_path = public
 as $$
 declare
   uid uuid;
@@ -20,14 +21,6 @@ begin
 
   for did in select device_id from public.devices where user_id = uid
   loop
-    delete from storage.objects
-    where bucket_id = 'photos'
-      and name like did || '/%';
-
-    delete from storage.objects
-    where bucket_id = 'post-media'
-      and split_part(name, '/', 2) = did;
-
     delete from public.reactions where device_id = did;
 
     delete from public.reports where reporter_device_id = did;
@@ -53,7 +46,7 @@ begin
     end loop;
 
     delete from public.rooms r
-    where r.members = array[did]::text[]; -- single-member rooms for this device
+    where r.members = array[did]::text[];
 
     update public.rooms
     set members = array_remove(members, did)

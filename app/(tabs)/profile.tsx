@@ -40,12 +40,11 @@ import {
   signInWithGoogle,
   deleteAccountAndEraseData,
 } from "../../utils/auth";
-import { getAlias } from "../../utils/aliases";
 import type { User } from "@supabase/supabase-js";
-import { getDeviceId } from "../../utils/device";
+import { deviceFallbackLabel, getDeviceId } from "../../utils/device";
 import { fetchSunsetTime, type SunsetInfo } from "../../utils/sunset";
 import { getLocalNickname, setLocalNickname, syncDeviceToSupabase, MAX_NICKNAME_LENGTH } from "../../utils/identity";
-import { leaveRoom, createRoom, syncSharedRoomNickname } from "../../utils/rooms";
+import { leaveRoom, createRoom, syncSharedRoomNickname, ROOM_MEMBERSHIP_LIMIT_MESSAGE } from "../../utils/rooms";
 import { fetchMyRoomsCached, invalidateRoomCache } from "../../utils/roomCache";
 import { syncLocalNicknamesFromRooms } from "../../utils/nicknames";
 import {
@@ -100,7 +99,6 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { glowAnim, pulseScale } = useSunGlowAnimation();
 
-  const [alias, setAlias] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [nickname, setNickname] = useState<string>("");
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -161,7 +159,6 @@ export default function ProfileScreen() {
         ]);
         const nickMap = await syncLocalNicknamesFromRooms(roomList);
         setDeviceId(id);
-        setAlias(getAlias(id));
         setNickname(nick ?? "");
         setAlertsEnabledState(enabled);
         if (sunset) setSunOut(sunset);
@@ -307,7 +304,12 @@ export default function ProfileScreen() {
       setRoomNicknames(nickMap);
       setNewlyCreatedCode(room.code);
     } catch (e) {
-      console.error(e);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === ROOM_MEMBERSHIP_LIMIT_MESSAGE) {
+        Alert.alert("Room limit", msg);
+      } else {
+        console.error(e);
+      }
     } finally {
       setCreatingRoom(false);
     }
@@ -507,7 +509,7 @@ export default function ProfileScreen() {
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal }}>
-                  {nickname || alias}
+                  {nickname || (deviceId ? deviceFallbackLabel(deviceId) : "")}
                 </Text>
                 {streak >= 2 && (
                   <View style={{
@@ -520,11 +522,6 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </View>
-              {nickname && (
-                <Text style={{ fontSize: 12, color: colors.ash, marginTop: 2, fontStyle: "italic" }}>
-                  alias: {alias}
-                </Text>
-              )}
             </View>
             <TouchableOpacity
               onPress={() => { setNicknameInput(nickname); setEditingNickname(true); }}
@@ -539,153 +536,12 @@ export default function ProfileScreen() {
         </View>
         </CloudCard>
 
-        {/* Today’s sun times */}
-        {sunOut && (
-          <CloudCard seed={3} bg={colors.mist}>
-          <View style={{ padding: 18, flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Text style={{ fontSize: 32 }}>☀️</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 12, color: colors.ash, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>
-                Today&apos;s Light
-              </Text>
-              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 6 }}>
-                Sunrise {sunOut.formattedSunriseLocal}
-              </Text>
-              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 4 }}>
-                Sunset {sunOut.formattedLocal}
-              </Text>
-            </View>
-          </View>
-          </CloudCard>
-        )}
-
-        {/* Rooms */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase" }}>
-            My Rooms
-          </Text>
-          <TouchableOpacity
-            onPress={handleCreateRoom}
-            disabled={creatingRoom}
-            style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-          >
-            {creatingRoom
-              ? <ActivityIndicator color={colors.ember} size="small" />
-              : <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ember }}>+ New Room</Text>
-            }
-          </TouchableOpacity>
-        </View>
-
-        <View style={{ gap: 10, marginBottom: 24 }}>
-          {rooms.length === 0 ? (
-            <Text style={{ color: colors.ash, fontSize: 14, textAlign: "center", paddingVertical: 20 }}>
-              No rooms yet — create or join one from the home screen.
-            </Text>
-          ) : rooms.map((room, i) => {
-            const rNick = roomNicknames[room.code] ?? room.nickname;
-            return (
-              <CloudCard key={room.id} seed={i + 1}>
-              <TouchableOpacity
-                onPress={() => router.push(`/room/${room.code}`)}
-                activeOpacity={interaction.activeOpacity}
-                style={{
-                  padding: 18,
-                  flexDirection: "row", alignItems: "center",
-                }}
-              >
-                <View style={{ flex: 1 }}>
-                  {rNick ? (
-                    <>
-                      <Text style={{ fontSize: 16, fontWeight: "800", color: colors.charcoal }}>{rNick}</Text>
-                      <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, marginTop: 2 }}>{room.code}</Text>
-                    </>
-                  ) : (
-                    <Text style={{ fontSize: 18, fontWeight: "800", color: colors.charcoal, letterSpacing: 4 }}>{room.code}</Text>
-                  )}
-                  <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4 }}>
-                    {room.members.length} {room.members.length === 1 ? "member" : "members"}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setLeavingRoom(room)}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 8,
-                    borderRadius: 10, borderWidth: 1.5, borderColor: colors.mist,
-                  }}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.ash }}>Leave</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-              </CloudCard>
-            );
-          })}
-        </View>
-
-        {/* Settings */}
-        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
-          Settings
-        </Text>
-
-        <CloudCard seed={4} style={{ marginBottom: 24 }}>
-        <View>
-          <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
-            <View style={{ flex: 1, marginRight: 16 }}>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Golden hour alerts</Text>
-              <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-                {Platform.OS === "web"
-                  ? "Available on iOS & Android only"
-                  : "Notify me 3 min before sunrise and sunset windows"}
-              </Text>
-            </View>
-            {togglingAlert
-              ? <ActivityIndicator color={colors.ember} />
-              : <Switch
-                  value={alertsEnabled}
-                  onValueChange={handleAlertToggle}
-                  disabled={Platform.OS === "web"}
-                  trackColor={{ false: colors.mist, true: colors.ember }}
-                  thumbColor="white"
-                />
-            }
-          </View>
-
-          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
-
-          <View style={{ padding: 20 }}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
-            <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
-            </Text>
-          </View>
-
-          {PRIVACY_POLICY_URL ? (
-            <>
-              <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
-              <TouchableOpacity
-                onPress={openPrivacyPolicy}
-                activeOpacity={interaction.activeOpacity}
-                style={{
-                  paddingVertical: 18,
-                  paddingHorizontal: 20,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
-                <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
-              </TouchableOpacity>
-            </>
-          ) : null}
-        </View>
-        </CloudCard>
-
-        {/* Account */}
+        {/* Account — above rooms so sign out / delete stay discoverable */}
         <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
           Account
         </Text>
 
-        <CloudCard seed={5} style={{ marginBottom: 48 }}>
+        <CloudCard seed={5} style={{ marginBottom: 24 }}>
         <View style={{ padding: 20 }}>
           {authUser ? (
             <>
@@ -808,6 +664,178 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </>
           )}
+        </View>
+        </CloudCard>
+
+        {/* Today’s sun times */}
+        {sunOut && (
+          <CloudCard seed={3} bg={colors.mist}>
+          <View style={{ padding: 18, flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Text style={{ fontSize: 32 }}>☀️</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 12, color: colors.ash, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>
+                Today&apos;s Light
+              </Text>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 6 }}>
+                Sunrise {sunOut.formattedSunriseLocal}
+              </Text>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal, marginTop: 4 }}>
+                Sunset {sunOut.formattedLocal}
+              </Text>
+            </View>
+          </View>
+          </CloudCard>
+        )}
+
+        {/* Rooms */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase" }}>
+            My Rooms
+          </Text>
+          <TouchableOpacity
+            onPress={handleCreateRoom}
+            disabled={creatingRoom}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+          >
+            {creatingRoom
+              ? <ActivityIndicator color={colors.ember} size="small" />
+              : <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ember }}>+ New Room</Text>
+            }
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ gap: 10, marginBottom: 24 }}>
+          {rooms.length === 0 ? (
+            <Text style={{ color: colors.ash, fontSize: 14, textAlign: "center", paddingVertical: 20 }}>
+              No rooms yet — create or join one from the home screen.
+            </Text>
+          ) : rooms.map((room, i) => {
+            const rNick = roomNicknames[room.code] ?? room.nickname;
+            return (
+              <CloudCard key={room.id} seed={i + 1}>
+              <TouchableOpacity
+                onPress={() => router.push(`/room/${room.code}`)}
+                activeOpacity={interaction.activeOpacity}
+                style={{
+                  padding: 18,
+                  flexDirection: "row", alignItems: "center",
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  {rNick ? (
+                    <>
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: colors.charcoal }}>{rNick}</Text>
+                      <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, marginTop: 2 }}>{room.code}</Text>
+                    </>
+                  ) : (
+                    <Text style={{ fontSize: 18, fontWeight: "800", color: colors.charcoal, letterSpacing: 4 }}>{room.code}</Text>
+                  )}
+                  <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4 }}>
+                    {room.members.length} {room.members.length === 1 ? "member" : "members"}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setLeavingRoom(room)}
+                  style={{
+                    paddingHorizontal: 14, paddingVertical: 8,
+                    borderRadius: 10, borderWidth: 1.5, borderColor: colors.mist,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.ash }}>Leave</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+              </CloudCard>
+            );
+          })}
+        </View>
+
+        {/* Settings */}
+        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
+          Settings
+        </Text>
+
+        <CloudCard seed={4} style={{ marginBottom: 48 }}>
+        <View>
+          <View style={{ flexDirection: "row", alignItems: "center", padding: 20, justifyContent: "space-between" }}>
+            <View style={{ flex: 1, marginRight: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Golden hour alerts</Text>
+              <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
+                {Platform.OS === "web"
+                  ? "Available on iOS & Android only"
+                  : "Notify me 3 min before sunrise and sunset windows"}
+              </Text>
+            </View>
+            {togglingAlert
+              ? <ActivityIndicator color={colors.ember} />
+              : <Switch
+                  value={alertsEnabled}
+                  onValueChange={handleAlertToggle}
+                  disabled={Platform.OS === "web"}
+                  trackColor={{ false: colors.mist, true: colors.ember }}
+                  thumbColor="white"
+                />
+            }
+          </View>
+
+          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+
+          <View style={{ padding: 20 }}>
+            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
+            <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
+              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
+            </Text>
+          </View>
+
+          {PRIVACY_POLICY_URL ? (
+            <>
+              <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+              <TouchableOpacity
+                onPress={openPrivacyPolicy}
+                activeOpacity={interaction.activeOpacity}
+                style={{
+                  paddingVertical: 18,
+                  paddingHorizontal: 20,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
+                <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+
+          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+          <TouchableOpacity
+            onPress={() => {
+              if (authUser) handleDeleteAccount();
+              else {
+                Alert.alert(
+                  "Delete account",
+                  "Sign in with the Google or email account you want to remove. Then use Delete account in the Account section.",
+                  [{ text: "OK" }]
+                );
+              }
+            }}
+            activeOpacity={interaction.activeOpacity}
+            disabled={deletingAccount}
+            style={{
+              paddingVertical: 18,
+              paddingHorizontal: 20,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.magenta }}>Delete account</Text>
+              <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4, lineHeight: 16 }}>
+                {authUser ? "Remove your login and server data for this account" : "Sign in first to delete a backed-up account"}
+              </Text>
+            </View>
+            {deletingAccount ? <ActivityIndicator color={colors.magenta} size="small" /> : <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>}
+          </TouchableOpacity>
         </View>
         </CloudCard>
 

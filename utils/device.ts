@@ -15,3 +15,10 @@ export async function getDeviceId(): Promise<string> {
   cachedDeviceId = id;
   return id;
 }
+
+/** Short label when no synced nickname exists (stable for a given device id). */
+export function deviceFallbackLabel(deviceId: string): string {
+  const compact = deviceId.replace(/-/g, "");
+  const tail = compact.length >= 6 ? compact.slice(-6) : compact;
+  return `Guest ${tail}`;
+}

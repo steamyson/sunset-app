@@ -1,4 +1,4 @@
-import { getAlias } from "../utils/aliases";
+import { deviceFallbackLabel } from "../utils/device";
 import { isWithinGoldenHour, isWithinGoldenHourSunrise } from "../utils/sunset";
 import { roomGlobePos, roomVariant } from "../utils/roomVisuals";
 
@@ -9,11 +9,11 @@ function assert(condition: boolean, message: string): void {
 }
 
 export function runDeterministicChecks(): void {
-  const a1 = getAlias("device-123");
-  const a2 = getAlias("device-123");
-  const a3 = getAlias("device-999");
-  assert(a1 === a2, "Alias generation should be deterministic for same device id.");
-  assert(a1 !== a3, "Different device ids should usually map to different aliases.");
+  const d1 = deviceFallbackLabel("550e8400-e29b-41d4-a716-446655440000");
+  const d2 = deviceFallbackLabel("550e8400-e29b-41d4-a716-446655440000");
+  const d3 = deviceFallbackLabel("550e8400-e29b-41d4-a716-446655440001");
+  assert(d1 === d2, "Device fallback label should be deterministic for same device id.");
+  assert(d1 !== d3, "Different device ids should map to different fallback labels.");
 
   const v1 = roomVariant("ABC123");
   const v2 = roomVariant("ABC123");

@@ -1,3 +1,4 @@
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { Platform } from "react-native";
 import { getItem, setItem } from "./storage";
 import {
@@ -22,9 +23,21 @@ function todayString(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Android Expo Go (SDK 53+) removes push support; importing expo-notifications throws. */
+export function canLoadExpoNotifications(): boolean {
+  if (Platform.OS === "web") return false;
+  if (
+    Platform.OS === "android" &&
+    Constants.executionEnvironment === ExecutionEnvironment.StoreClient
+  ) {
+    return false;
+  }
+  return true;
+}
+
 // Lazily import expo-notifications only on native
 async function getNotifications() {
-  if (Platform.OS === "web") return null;
+  if (!canLoadExpoNotifications()) return null;
   try {
     const mod = await import("expo-notifications");
     // Expo Go SDK 53+ strips push notification functions — check they exist

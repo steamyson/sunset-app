@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { PHOTOS_BUCKET, photosPathFromStoredRef } from "./photosStorage";
 import { getDeviceId } from "./device";
 import { getLocalRoomCodes, addLocalRoomCode, clearAllLocalRooms } from "./rooms";
 import {
@@ -11,6 +12,45 @@ import { clearReportedCache } from "./messages";
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const POST_MEDIA_BUCKET = "post-media";
+
+function parseAccountDeletionPaths(raw: unknown): {
+  photoRefs: string[];
+  postMediaPaths: string[];
+  avatarPaths: string[];
+} {
+  if (!raw || typeof raw !== "object") {
+    return { photoRefs: [], postMediaPaths: [], avatarPaths: [] };
+  }
+  const o = raw as Record<string, unknown>;
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return {
+    photoRefs: strings(o.photoRefs),
+    postMediaPaths: strings(o.postMediaPaths),
+    avatarPaths: strings(o.avatarPaths),
+  };
+}
+
+async function removeStorageObjectsBestEffort(bucket: string, paths: string[]): Promise<void> {
+  const unique = [...new Set(paths.filter(Boolean))];
+  const batch = 100;
+  for (let i = 0; i < unique.length; i += batch) {
+    const slice = unique.slice(i, i + batch);
+    const { error } = await supabase.storage.from(bucket).remove(slice);
+    if (error) console.warn(`[deleteAccount] storage.remove ${bucket}:`, error.message);
+  }
+}
+
+/** PostgREST often needs a reload before new RPCs appear; see migration NOTIFY. */
+function isGetPathsRpcUnavailable(err: { message?: string } | null | undefined): boolean {
+  const m = (err?.message ?? "").toLowerCase();
+  return (
+    m.includes("schema cache") ||
+    m.includes("could not find the function") ||
+    m.includes("does not exist")
+  );
+}
 import * as Linking from "expo-linking";
 import type { User } from "@supabase/supabase-js";
 
@@ -136,6 +176,33 @@ export async function deleteAccountAndEraseData(): Promise<void> {
   } = await supabase.auth.getSession();
   if (!session?.access_token || !session.user) {
     throw new Error("You need to be signed in to delete your account.");
+  }
+
+  const { data: pathPayload, error: pathErr } = await supabase.rpc("get_linked_account_storage_paths");
+  if (pathErr && !isGetPathsRpcUnavailable(pathErr)) {
+    throw new Error(pathErr.message);
+  }
+  if (!pathErr && pathPayload != null) {
+    const { photoRefs, postMediaPaths, avatarPaths } = parseAccountDeletionPaths(pathPayload);
+    const localUriPattern = /^(file|content|blob):/i;
+    const photoBucketKeys = new Set<string>();
+    for (const p of avatarPaths) {
+      if (p && !localUriPattern.test(p)) photoBucketKeys.add(p);
+    }
+    for (const ref of photoRefs) {
+      const normalized = photosPathFromStoredRef(ref);
+      if (normalized && !localUriPattern.test(normalized)) photoBucketKeys.add(normalized);
+    }
+
+    await removeStorageObjectsBestEffort(PHOTOS_BUCKET, [...photoBucketKeys]);
+    await removeStorageObjectsBestEffort(
+      POST_MEDIA_BUCKET,
+      postMediaPaths.filter((p) => p && !localUriPattern.test(p)),
+    );
+  } else if (pathErr) {
+    console.warn(
+      "[deleteAccount] get_linked_account_storage_paths unavailable; continuing without storage prefetch. Run NOTIFY pgrst in SQL editor or restart the API, then delete again to remove files."
+    );
   }
 
   const { error: rpcError } = await supabase.rpc("erase_linked_account_data");

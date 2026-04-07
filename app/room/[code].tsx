@@ -22,10 +22,9 @@ import { useLocalSearchParams, router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../utils/messages";
-import { getAlias } from "../../utils/aliases";
+import { deviceFallbackLabel, getDeviceId } from "../../utils/device";
 import { getRoomNickname } from "../../utils/nicknames";
 import { getNicknames } from "../../utils/identity";
-import { getDeviceId } from "../../utils/device";
 import { fetchReactions, type ReactionMap, type MessageReactions } from "../../utils/reactions";
 import { reverseGeocode } from "../../utils/geocoding";
 import { FilteredImage } from "../../components/FilteredImage";
@@ -619,13 +618,17 @@ export default function RoomThread() {
     const ids = [...roomMembers];
     if (!myDeviceId) {
       return ids.sort((a, b) =>
-        (memberDisplayNames[a] ?? getAlias(a)).localeCompare(memberDisplayNames[b] ?? getAlias(b))
+        (memberDisplayNames[a] ?? deviceFallbackLabel(a)).localeCompare(
+          memberDisplayNames[b] ?? deviceFallbackLabel(b)
+        )
       );
     }
     return ids.sort((a, b) => {
       if (a === myDeviceId) return -1;
       if (b === myDeviceId) return 1;
-      return (memberDisplayNames[a] ?? getAlias(a)).localeCompare(memberDisplayNames[b] ?? getAlias(b));
+      return (memberDisplayNames[a] ?? deviceFallbackLabel(a)).localeCompare(
+        memberDisplayNames[b] ?? deviceFallbackLabel(b)
+      );
     });
   }, [roomMembers, memberDisplayNames, myDeviceId]);
 
@@ -896,7 +899,7 @@ export default function RoomThread() {
             {sortedMemberIds.map((mid) => (
               <RoomMemberChip
                 key={mid}
-                label={mid === myDeviceId ? "You" : (memberDisplayNames[mid] ?? getAlias(mid))}
+                label={mid === myDeviceId ? "You" : (memberDisplayNames[mid] ?? deviceFallbackLabel(mid))}
                 avatar={memberAvatarsMap[mid] ?? DEFAULT_AVATAR}
               />
             ))}
@@ -943,7 +946,7 @@ export default function RoomThread() {
               displayName={
                 msg.sender_device_id === myDeviceId
                   ? "You"
-                  : senderNames[msg.sender_device_id] ?? getAlias(msg.sender_device_id)
+                  : senderNames[msg.sender_device_id] ?? deviceFallbackLabel(msg.sender_device_id)
               }
               onReport={() => handleReport(msg.id)}
               reactions={reactions[msg.id] ?? {}}

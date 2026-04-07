@@ -2,9 +2,30 @@ import { supabase, Room } from "./supabase";
 
 const GENERIC_ERR = "Something went wrong. Please try again.";
 
+/** Max rooms a single device may belong to at once (enforced in DB + client). */
+export const MAX_ROOMS_PER_DEVICE = 8;
+
+export const ROOM_MEMBERSHIP_LIMIT_MESSAGE =
+  "You can be in up to 8 rooms at once. Leave one to add another.";
+
+function isRoomLimitBackendMessage(msg: string | undefined): boolean {
+  return (msg ?? "").includes("ROOM_MEMBERSHIP_LIMIT");
+}
+
 function logAndThrow(scope: string, err: { message?: string } | null) {
   if (err?.message) console.error(scope, err.message);
+  if (isRoomLimitBackendMessage(err?.message)) {
+    throw new Error(ROOM_MEMBERSHIP_LIMIT_MESSAGE);
+  }
   throw new Error(GENERIC_ERR);
+}
+
+export async function countMembershipRooms(deviceId: string): Promise<number> {
+  const { data, error } = await supabase.rpc("count_room_memberships_for_device", {
+    p_device_id: deviceId,
+  });
+  if (error) logAndThrow("countMembershipRooms", error);
+  return typeof data === "number" ? data : 0;
 }
 import { getDeviceId } from "./device";
 import { getItem, setItem, safeJsonParse } from "./storage";
@@ -47,6 +68,11 @@ export async function addLocalRoomCode(code: string) {
 
 export async function createRoom(): Promise<Room> {
   const deviceId = await getDeviceId();
+  const membershipCount = await countMembershipRooms(deviceId);
+  if (membershipCount >= MAX_ROOMS_PER_DEVICE) {
+    throw new Error(ROOM_MEMBERSHIP_LIMIT_MESSAGE);
+  }
+
   let code = generateCode();
   const MAX_CODE_RETRIES = 10;
   let attempts = 0;
@@ -85,6 +111,14 @@ export async function createRoom(): Promise<Room> {
 export async function joinRoom(code: string): Promise<Room> {
   const deviceId = await getDeviceId();
   const upperCode = code.trim().toUpperCase();
+
+  const localCodes = await getLocalRoomCodes();
+  if (!localCodes.includes(upperCode)) {
+    const membershipCount = await countMembershipRooms(deviceId);
+    if (membershipCount >= MAX_ROOMS_PER_DEVICE) {
+      throw new Error(ROOM_MEMBERSHIP_LIMIT_MESSAGE);
+    }
+  }
 
   const { data: rpcResult, error } = await supabase.rpc("join_room_by_code", {
     p_code: upperCode,

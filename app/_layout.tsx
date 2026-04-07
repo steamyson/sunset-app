@@ -1,6 +1,6 @@
 import "../global.css";
 import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { View, Alert } from "react-native";
 import { Stack, router } from "expo-router";
 import * as Linking from "expo-linking";
 import { useFonts } from "expo-font";
@@ -14,7 +14,7 @@ import { registerPushToken } from "../utils/push";
 import { getAuthUser, linkDeviceToUser } from "../utils/auth";
 import { SunriseIntro } from "../components/SunriseIntro";
 import { markIntroFinished } from "../utils/introGate";
-import { joinRoom } from "../utils/rooms";
+import { joinRoom, ROOM_MEMBERSHIP_LIMIT_MESSAGE } from "../utils/rooms";
 
 /**
  * When `true` (only in dev), onboarding is shown on every cold start so you can re-test the flow.
@@ -46,8 +46,12 @@ export default function RootLayout() {
       try {
         await joinRoom(code);
         if (!cancelled) router.replace("/(tabs)/chats");
-      } catch {
-        // Ignore invalid deep links and continue normal app flow.
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === ROOM_MEMBERSHIP_LIMIT_MESSAGE) {
+          Alert.alert("Couldn't join room", msg);
+        }
+        // Other failures: invalid codes, etc. — keep silent for normal app flow.
       }
     }
 

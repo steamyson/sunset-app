@@ -1,9 +1,10 @@
 import { Platform } from "react-native";
-import { supabase } from "./supabase";
 import { getLocalNickname } from "./identity";
+import { canLoadExpoNotifications } from "./notifications";
+import { supabase } from "./supabase";
 
 export async function registerPushToken(deviceId: string): Promise<void> {
-  if (Platform.OS === "web") return;
+  if (Platform.OS === "web" || !canLoadExpoNotifications()) return;
   try {
     const mod = await import("expo-notifications");
     if (typeof mod.getExpoPushTokenAsync !== "function") return;
