@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { FunctionsHttpError, type User } from "@supabase/supabase-js";
 import { PHOTOS_BUCKET, photosPathFromStoredRef } from "./photosStorage";
 import { getDeviceId } from "./device";
 import { getLocalRoomCodes, addLocalRoomCode, clearAllLocalRooms } from "./rooms";
@@ -9,9 +10,8 @@ import {
 } from "./nicknames";
 import { invalidateRoomCache } from "./roomCache";
 import { clearReportedCache } from "./messages";
+import * as Linking from "expo-linking";
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const POST_MEDIA_BUCKET = "post-media";
 
 function parseAccountDeletionPaths(raw: unknown): {
@@ -51,8 +51,47 @@ function isGetPathsRpcUnavailable(err: { message?: string } | null | undefined):
     m.includes("does not exist")
   );
 }
-import * as Linking from "expo-linking";
-import type { User } from "@supabase/supabase-js";
+
+/**
+ * Edge Function + Admin API (hosted DELETE /auth/v1/user returns 405).
+ * Uses supabase.functions.invoke so apikey + Authorization match the client; refreshSession avoids stale JWT after a long erase flow.
+ */
+async function invokeDeleteAuthUserEdge(): Promise<void> {
+  const { error: refreshErr } = await supabase.auth.refreshSession();
+  if (refreshErr) {
+    const {
+      data: { session: s },
+    } = await supabase.auth.getSession();
+    if (!s?.access_token) throw new Error(refreshErr.message);
+  }
+
+  const { error } = await supabase.functions.invoke("delete-auth-user", {
+    method: "POST",
+    body: {},
+  });
+
+  if (!error) return;
+
+  if (error instanceof FunctionsHttpError) {
+    const res = error.context as Response;
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { message?: string };
+      if (typeof j.message === "string") msg = j.message;
+    } catch {
+      /* keep text */
+    }
+    if (res.status === 404) {
+      throw new Error(
+        "Could not remove login: deploy the delete-auth-user Edge Function (see supabase/functions/delete-auth-user/README.md)."
+      );
+    }
+    throw new Error(msg || `Could not delete login (${res.status}).`);
+  }
+
+  throw new Error(error instanceof Error ? error.message : "Could not delete login.");
+}
 
 try {
   require("expo-web-browser").maybeCompleteAuthSession();
@@ -167,8 +206,7 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * Apple / GDPR-style account deletion: server RPC erases linked device data, then Auth user is removed.
- * Requires Supabase Auth to allow user self-deletion (Dashboard → Authentication → Users, or API settings).
+ * Apple / GDPR-style account deletion: Storage cleanup, RPC erases linked device data, Edge Function removes auth user.
  */
 export async function deleteAccountAndEraseData(): Promise<void> {
   const {
@@ -208,22 +246,13 @@ export async function deleteAccountAndEraseData(): Promise<void> {
   const { error: rpcError } = await supabase.rpc("erase_linked_account_data");
   if (rpcError) throw new Error(rpcError.message);
 
-  const res = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/auth/v1/user`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: SUPABASE_ANON_KEY,
-    },
-  });
+  await invokeDeleteAuthUserEdge();
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      text || `Could not delete login (${res.status}). Enable user self-deletion in Supabase Auth or try again.`
-    );
+  try {
+    await supabase.auth.signOut({ scope: "global" });
+  } catch {
+    // User row is gone; session clear may fail harmlessly
   }
-
-  await supabase.auth.signOut({ scope: "global" });
   await clearAllLocalRooms();
   await clearAllRoomNicknames();
   invalidateRoomCache();
