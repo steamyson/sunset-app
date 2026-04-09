@@ -17,8 +17,8 @@ import {
   PanResponder,
 } from "react-native";
 import { Text } from "../../../components/Text";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, router } from "expo-router";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLocalSearchParams, router, useNavigation } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../../utils/messages";
@@ -126,8 +126,39 @@ function hasPhotoUrl(photoUrl: string | null | undefined): photoUrl is string {
 export default function RoomThread() {
   const params = useLocalSearchParams<{ code: string; unread?: string; name?: string }>();
   const code = params.code;
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const edgeDragX = useRef(new Animated.Value(0)).current;
+
+  useFocusEffect(
+    useCallback(() => {
+      const stackNav = navigation.getParent();
+      const tabNav = stackNav?.getParent() as { setOptions: (o: { tabBarStyle?: object }) => void } | undefined;
+      if (!tabNav?.setOptions) return;
+
+      const tabBarHeight = 68 + insets.bottom;
+      const chatsTabBarStyle = {
+        position: "absolute" as const,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: "transparent" as const,
+        borderTopWidth: 0,
+        elevation: 0,
+        shadowOpacity: 0,
+        paddingBottom: insets.bottom + 8,
+        paddingTop: 10,
+        height: tabBarHeight,
+      };
+
+      tabNav.setOptions({ tabBarStyle: { display: "none", height: 0 } });
+
+      return () => {
+        tabNav.setOptions({ tabBarStyle: chatsTabBarStyle });
+      };
+    }, [navigation, insets.bottom])
+  );
 
   const handleBack = useCallback(() => {
     router.back();

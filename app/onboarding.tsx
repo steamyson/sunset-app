@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  Easing,
   Modal,
   PanResponder,
   Platform,
@@ -214,6 +215,7 @@ export default function OnboardingScreen() {
 function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
   const titleOpacity = useRef(new Animated.Value(0)).current;
   const taglineOpacity = useRef(new Animated.Value(0)).current;
+  const tapHintAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.sequence([
@@ -231,6 +233,20 @@ function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(tapHintAnim, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(tapHintAnim, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [tapHintAnim]);
+
+  const tapHintOpacity = tapHintAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.95] });
+  const tapHintNudgeY = tapHintAnim.interpolate({ inputRange: [0, 1], outputRange: [3, -3] });
+
   return (
     <Pressable style={styles.stepFull} onPress={onAdvance}>
       <View style={styles.centerGroup}>
@@ -241,7 +257,18 @@ function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
           <Text style={styles.welcomeTagline}>sunrise and sunset, once each.</Text>
         </Animated.View>
       </View>
-      <Text style={styles.tapToContinue}>tap to continue</Text>
+      <Animated.View
+        style={{
+          marginTop: spacing.lg,
+          paddingHorizontal: spacing.md,
+          opacity: tapHintOpacity,
+          transform: [{ translateY: tapHintNudgeY }],
+          alignItems: "center",
+        }}
+      >
+        <Text style={styles.tapToContinueProminent}>Tap to continue</Text>
+        <Text style={styles.tapToContinueSub}>anywhere on this screen</Text>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -643,6 +670,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.mist,
     marginTop: spacing.md,
+  },
+  tapToContinueProminent: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.ash,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    textAlign: "center",
+  },
+  tapToContinueSub: {
+    fontSize: 12,
+    color: colors.ash,
+    marginTop: 6,
+    textAlign: "center",
+    lineHeight: 18,
+    opacity: 0.92,
   },
 
   // Step 1

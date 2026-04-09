@@ -17,7 +17,7 @@ export default function ChatsStackLayout() {
         name="[code]"
         options={{
           presentation: "transparentModal",
-          animation: "slide_from_right",
+          animation: "none",
           contentStyle: { backgroundColor: "transparent" },
           gestureEnabled: false,
         }}

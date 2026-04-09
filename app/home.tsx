@@ -10,12 +10,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { router } from "expo-router";
 import { fetchSunsetTime, nextGoldenHourWindow, type SunsetInfo } from "../utils/sunset";
+import { getItem, setItem } from "../utils/storage";
 import { colors } from "../utils/theme";
 import { SunGlow, useSunGlowAnimation } from "../components/SunGlow";
 
 const { width: W, height: H } = Dimensions.get("window");
 
 const SPARK_COLORS = [colors.sunShadow, colors.amber, colors.ember, colors.sunCore, colors.sunRayOuter, colors.sunRayMid];
+
+const HOME_SWIPE_HINT_KEY = "home_swipe_hint_visits_v1";
+const HOME_SWIPE_HINT_MAX = 5;
 
 type Particle = {
   id: number;
@@ -119,6 +123,27 @@ export default function HomeScreen() {
   const [headline, setHeadline] = useState<string | null>(null);
   const [subline, setSubline] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<string | null>(null);
+  /** null = still reading storage; true = show swipe hint; false = user has seen it enough times */
+  const [showSwipeHint, setShowSwipeHint] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const raw = await getItem(HOME_SWIPE_HINT_KEY);
+      if (cancelled) return;
+      const n = Math.max(0, Math.min(HOME_SWIPE_HINT_MAX, parseInt(raw ?? "0", 10) || 0));
+      if (n >= HOME_SWIPE_HINT_MAX) {
+        setShowSwipeHint(false);
+        return;
+      }
+      setShowSwipeHint(true);
+      if (cancelled) return;
+      await setItem(HOME_SWIPE_HINT_KEY, String(n + 1));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     fetchSunsetTime().then((info) => {
@@ -166,15 +191,18 @@ export default function HomeScreen() {
     ).start();
   }, [driftAnim]);
 
-  // "Swipe to continue" breathing
+  // "Swipe to continue" breathing — only while the hint is shown
   useEffect(() => {
-    Animated.loop(
+    if (!showSwipeHint) return;
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(swipeAnim, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
         Animated.timing(swipeAnim, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
       ])
-    ).start();
-  }, [swipeAnim]);
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [showSwipeHint, swipeAnim]);
 
   // Content entrance — fires when sunInfo arrives
   useEffect(() => {
@@ -191,7 +219,8 @@ export default function HomeScreen() {
   }, [countdown]);
 
   const sunDriftY      = driftAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -18] });
-  const swipeOpacity   = swipeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.65] });
+  const swipeOpacity   = swipeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.9] });
+  const swipeNudgeX    = swipeAnim.interpolate({ inputRange: [0, 1], outputRange: [-5, 5] });
   const contentOpacity = contentAnim;
   const contentSlideY  = contentAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
 
@@ -304,11 +333,24 @@ export default function HomeScreen() {
                 The next golden hour awaits.
               </Text>
             )}
-            <Animated.View style={{ marginTop: 56, opacity: swipeOpacity }}>
-              <Text style={{ fontSize: 11, color: colors.mist, letterSpacing: 1.5, textTransform: "uppercase" }}>
-                swipe to continue
-              </Text>
-            </Animated.View>
+            {showSwipeHint ? (
+              <Animated.View
+                style={{
+                  marginTop: 48,
+                  paddingHorizontal: 20,
+                  opacity: swipeOpacity,
+                  transform: [{ translateX: swipeNudgeX }],
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: "700", color: colors.ash, letterSpacing: 1.2, textTransform: "uppercase", textAlign: "center" }}>
+                  Swipe the screen away
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.ash, marginTop: 6, textAlign: "center", lineHeight: 18, opacity: 0.92 }}>
+                  Any direction — flick to open your sky
+                </Text>
+              </Animated.View>
+            ) : null}
           </View>
         </SafeAreaView>
       </Animated.View>
