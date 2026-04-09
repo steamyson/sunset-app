@@ -95,9 +95,10 @@ None yet.
 | 260405-lwr | Add My Map toggle to Send to sheet — save photo to map without sending to a room | 2026-04-05 | 7a91a39 | [260405-lwr-add-my-map](./quick/260405-lwr-add-my-map-option-to-send-to-sheet/) |
 | 260409-h5b | Update privacy policy: location required, in-app account deletion, GDPR section, author name fix | 2026-04-09 | 83e3d76 | [260409-h5b-privacy](./quick/260409-h5b-update-privacy-policy-for-location-requi/) |
 | 260409-hd0 | App Store submission fixes: expo-image-picker plugin, export compliance declaration, hardcode privacy URL, fix COPPA age threshold to 13 | 2026-04-09 | a55d2e4 | [260409-hd0-app-store](./quick/260409-hd0-app-store-submission-fixes-image-picker-/) |
+| 260409-jx3 | Security: store raw path in saveToMyMap instead of permanent public URL | 2026-04-09 | b3fb790 | [260409-jx3-savetomymap](./quick/260409-jx3-fix-savetomymap-to-store-raw-path-not-pu/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-09 - Completed quick task 260409-hd0: App Store submission fixes
-Stopped at: Completed quick-260409-hd0: App store submission fixes image-picker plugin, encryption declaration, privacy policy link, children age threshold
+Last activity: 2026-04-09 - Completed quick task 260409-jx3: fix saveToMyMap raw path
+Stopped at: Completed quick-260409-jx3: fix saveToMyMap to store raw path not public URL
 Resume file: None
