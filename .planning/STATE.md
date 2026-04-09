@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: "Completed quick-260405-lwr: Add My Map option to send-to sheet"
-last_updated: "2026-04-05T19:53:16.668Z"
-last_activity: "2026-04-05 - Completed quick task 260405-lc5: Add swipe-up gallery grid to map PinModal"
+stopped_at: "Completed quick-260409-h5b: Update privacy policy for location requirement"
+last_updated: "2026-04-09T00:00:00.000Z"
+last_activity: "2026-04-09 - Completed quick task 260409-h5b: Update privacy policy for location, deletion, GDPR"
 progress:
   total_phases: 4
   completed_phases: 2
@@ -93,6 +93,7 @@ None yet.
 | 260405-1op | Two chats.tsx fixes: center fresh cloud layout (gridStartX offset + CLOUD_POS_KEY v2); room creation popup name input promoted to top/large with KeyboardAvoidingView | 2026-04-05 | 891fd0f | [260405-1op-fixes](./quick/260405-1op-two-chats-tsx-fixes-center-clouds-horizo/) |
 | 260405-lc5 | Add swipe-up gallery grid to map PinModal | 2026-04-05 | ae2adc5 | [260405-lc5-gallery](./quick/260405-lc5-add-swipe-up-gallery-grid-to-map-pinmoda/) |
 | 260405-lwr | Add My Map toggle to Send to sheet — save photo to map without sending to a room | 2026-04-05 | 7a91a39 | [260405-lwr-add-my-map](./quick/260405-lwr-add-my-map-option-to-send-to-sheet/) |
+| 260409-h5b | Update privacy policy: location required, in-app account deletion, GDPR section, author name fix | 2026-04-09 | 83e3d76 | [260409-h5b-privacy](./quick/260409-h5b-update-privacy-policy-for-location-requi/) |
 
 ## Session Continuity
 
