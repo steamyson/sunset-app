@@ -26,7 +26,7 @@ import AnimatedReanimated, {
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
-import { Text } from "../../components/Text";
+import { Text } from "../../../components/Text";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
@@ -37,24 +37,24 @@ const { width: W, height: H } = Dimensions.get("window");
 const SKY_HEIGHT = H * 0.6;
 
 import * as Haptics from "expo-haptics";
-import { supabase } from "../../utils/supabase";
-import { getItem, setItem, safeJsonParse } from "../../utils/storage";
-import { getDeviceId } from "../../utils/device";
-import { leaveRoom, createRoom, joinRoom, syncSharedRoomNickname } from "../../utils/rooms";
-import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../utils/roomCache";
-import { getAllNicknames, setRoomNickname as persistLocalRoomNickname, syncLocalNicknamesFromRooms } from "../../utils/nicknames";
-import { getLocalNickname } from "../../utils/identity";
-import { fetchLatestMessageTimes } from "../../utils/messages";
-import { getAllLastSeen } from "../../utils/lastSeen";
-import { colors, interaction, spacing } from "../../utils/theme";
-import { runWhenIdle } from "../../utils/runWhenIdle";
-import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
-import { fetchMemberAvatars, type Avatar } from "../../utils/avatar";
-import type { Room } from "../../utils/supabase";
-import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
-import { CONTINENTS } from "../../continents";
-import { roomVariant, roomGlobePos } from "../../utils/roomVisuals";
-import { ParticleTrail, type ParticleTrailHandle } from "../../components/ParticleTrail";
+import { supabase } from "../../../utils/supabase";
+import { getItem, setItem, safeJsonParse } from "../../../utils/storage";
+import { getDeviceId } from "../../../utils/device";
+import { leaveRoom, createRoom, joinRoom, syncSharedRoomNickname } from "../../../utils/rooms";
+import { fetchMyRoomsCached, invalidateRoomCache, prefetchRoom } from "../../../utils/roomCache";
+import { getAllNicknames, setRoomNickname as persistLocalRoomNickname, syncLocalNicknamesFromRooms } from "../../../utils/nicknames";
+import { getLocalNickname } from "../../../utils/identity";
+import { fetchLatestMessageTimes } from "../../../utils/messages";
+import { getAllLastSeen } from "../../../utils/lastSeen";
+import { colors, interaction, spacing } from "../../../utils/theme";
+import { runWhenIdle } from "../../../utils/runWhenIdle";
+import { SkyCloud, DecorativeCloud } from "../../../components/SkyCloud";
+import { fetchMemberAvatars, type Avatar } from "../../../utils/avatar";
+import type { Room } from "../../../utils/supabase";
+import { SunGlow, useSunGlowAnimation } from "../../../components/SunGlow";
+import { CONTINENTS } from "../../../continents";
+import { roomVariant, roomGlobePos } from "../../../utils/roomVisuals";
+import { ParticleTrail, type ParticleTrailHandle } from "../../../components/ParticleTrail";
 
 function cloudDisplayName(room: Room, nicknames: Record<string, string>) {
   return nicknames[room.code] ?? room.nickname ?? room.code;
@@ -764,7 +764,7 @@ export default function ChatsScreen() {
       }).start(({ finished }) => {
         if (finished) {
           router.push({
-            pathname: "/room/[code]",
+            pathname: "/(tabs)/chats/[code]",
             params: unread
               ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) }
               : { code: room.code, name: cloudDisplayName(room, nicknames) },
@@ -998,7 +998,7 @@ export default function ChatsScreen() {
           if (mw === 0 || mh === 0) {
             // Fallback: measureInWindow returned zeros — plain push
             router.push({
-              pathname: "/room/[code]",
+              pathname: "/(tabs)/chats/[code]",
               params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
             });
             if (unread) markRoomReadAfterNav(room.code);
@@ -1012,7 +1012,7 @@ export default function ChatsScreen() {
       } else {
         // No ref — fallback to plain push
         router.push({
-          pathname: "/room/[code]",
+          pathname: "/(tabs)/chats/[code]",
           params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
         });
         if (unread) markRoomReadAfterNav(room.code);
@@ -1130,14 +1130,7 @@ export default function ChatsScreen() {
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <View style={{ flex: 1, backgroundColor: "transparent" }}>
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFillObject,
-          { zIndex: -1, backgroundColor: screenBgColor },
-        ]}
-      />
+    <Animated.View style={{ flex: 1, backgroundColor: screenBgColor }}>
     <ParticleTrail ref={particleRef} style={{ flex: 1 }} disabled>
 
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
@@ -1267,7 +1260,7 @@ export default function ChatsScreen() {
                     const unread = unreadRooms.has(room.code);
                     setTimeout(() => {
                       router.push({
-                        pathname: "/room/[code]",
+                        pathname: "/(tabs)/chats/[code]",
                         params: unread ? { code: room.code, unread: "true", name: cloudDisplayName(room, nicknames) } : { code: room.code, name: cloudDisplayName(room, nicknames) },
                       });
                     }, 420);
@@ -1619,7 +1612,7 @@ export default function ChatsScreen() {
           transform: [{ scale: tapBloomScale }],
         }}
       />
-    </View>
+    </Animated.View>
   );
 }
 

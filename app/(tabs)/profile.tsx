@@ -703,7 +703,7 @@ export default function ProfileScreen() {
             return (
               <CloudCard key={room.id} seed={i + 1}>
               <TouchableOpacity
-                onPress={() => router.push(`/room/${room.code}`)}
+                onPress={() => router.push(`/(tabs)/chats/${room.code}`)}
                 activeOpacity={interaction.activeOpacity}
                 style={{
                   padding: 18,
