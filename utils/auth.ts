@@ -174,7 +174,9 @@ export async function signInWithGoogle(): Promise<User | null> {
     throw new Error("Google sign in requires a full app build. Use email sign in for now.");
   }
 
-  const redirectTo = Linking.createURL("/");
+  // exp+dusk is auto-registered by Expo dev client without a rebuild.
+  // dusk:// requires a native build — switch to dusk:/// for production builds.
+  const redirectTo = __DEV__ ? "exp+dusk:///" : "dusk:///";
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -184,21 +186,44 @@ export async function signInWithGoogle(): Promise<User | null> {
   if (error) throw new Error(error.message);
   if (!data.url) throw new Error("No OAuth URL returned.");
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  // On Android, openAuthSessionAsync may not intercept the scheme redirect — the deep link
+  // fires through _layout.tsx's Linking listener instead, which calls exchangeCodeForSession.
+  // onAuthStateChange handles both paths: resolves when SIGNED_IN fires regardless of source.
+  return new Promise((resolve, reject) => {
+    let done = false;
 
-  if (result.type !== "success") return null;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (done || event !== "SIGNED_IN") return;
+      done = true;
+      subscription.unsubscribe();
+      if (!session?.user) { resolve(null); return; }
+      try {
+        await linkDeviceToUser(session.user.id);
+        await restoreRoomsForUser(session.user.id);
+        resolve(session.user);
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
 
-  const url = result.url;
-  const { data: { session }, error: sessionError } = await supabase.auth.exchangeCodeForSession(
-    new URL(url).searchParams.get("code") ?? ""
-  );
-
-  if (sessionError) throw new Error(sessionError.message);
-  if (!session?.user) return null;
-
-  await linkDeviceToUser(session.user.id);
-  await restoreRoomsForUser(session.user.id);
-  return session.user;
+    // openBrowserAsync (not openAuthSessionAsync) — lets the OS handle the dusk:// redirect
+    // naturally. _layout.tsx's Linking listener catches the deep link, calls
+    // exchangeCodeForSession, dismisses the browser, and triggers onAuthStateChange above.
+    WebBrowser.openBrowserAsync(data.url).then(() => {
+      // Browser closed without completing auth (user cancelled)
+      if (!done) {
+        done = true;
+        subscription.unsubscribe();
+        resolve(null);
+      }
+    }).catch((e: unknown) => {
+      if (!done) {
+        done = true;
+        subscription.unsubscribe();
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  });
 }
 
 export async function signOut(): Promise<void> {

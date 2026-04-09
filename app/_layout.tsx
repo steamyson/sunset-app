@@ -9,9 +9,10 @@ import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
 import { getItem, setItem } from "../utils/storage";
 import { getDeviceId } from "../utils/device";
-import { setDeviceSessionWithRetry } from "../utils/supabase";
+import { supabase, setDeviceSessionWithRetry } from "../utils/supabase";
 import { registerPushToken } from "../utils/push";
 import { getAuthUser, linkDeviceToUser } from "../utils/auth";
+import * as WebBrowser from "expo-web-browser";
 import { SunriseIntro } from "../components/SunriseIntro";
 import { markIntroFinished } from "../utils/introGate";
 import { joinRoom, ROOM_MEMBERSHIP_LIMIT_MESSAGE } from "../utils/rooms";
@@ -41,6 +42,16 @@ export default function RootLayout() {
   useEffect(() => {
     let cancelled = false;
     async function handleDeepLink(url: string) {
+      const parsed = Linking.parse(url);
+      const queryCode = typeof parsed.queryParams?.code === "string" ? parsed.queryParams.code : null;
+
+      // OAuth callback: code is long (Supabase PKCE code, not a 6-char room code)
+      if (queryCode && queryCode.length > 10) {
+        await supabase.auth.exchangeCodeForSession(queryCode);
+        WebBrowser.dismissBrowser();
+        return;
+      }
+
       const code = extractRoomCode(url);
       if (!code || code.length < 6) return;
       try {
