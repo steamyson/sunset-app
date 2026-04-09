@@ -42,10 +42,22 @@ export default function RootLayout() {
   useEffect(() => {
     let cancelled = false;
     async function handleDeepLink(url: string) {
+      // Implicit flow: tokens arrive in the URL hash fragment (#access_token=...&refresh_token=...)
+      const hash = url.includes("#") ? url.split("#")[1] : "";
+      if (hash) {
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get("access_token");
+        const refreshToken = params.get("refresh_token");
+        if (accessToken && refreshToken) {
+          await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          WebBrowser.dismissBrowser();
+          return;
+        }
+      }
+
+      // PKCE flow: auth code arrives as a query param (?code=...)
       const parsed = Linking.parse(url);
       const queryCode = typeof parsed.queryParams?.code === "string" ? parsed.queryParams.code : null;
-
-      // OAuth callback: code is long (Supabase PKCE code, not a 6-char room code)
       if (queryCode && queryCode.length > 10) {
         await supabase.auth.exchangeCodeForSession(queryCode);
         WebBrowser.dismissBrowser();

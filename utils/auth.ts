@@ -206,15 +206,19 @@ export async function signInWithGoogle(): Promise<User | null> {
       }
     });
 
-    // openBrowserAsync (not openAuthSessionAsync) — lets the OS handle the dusk:// redirect
-    // naturally. _layout.tsx's Linking listener catches the deep link, calls
-    // exchangeCodeForSession, dismisses the browser, and triggers onAuthStateChange above.
-    WebBrowser.openBrowserAsync(data.url).then(() => {
-      // Browser closed without completing auth (user cancelled)
+    // openBrowserAsync — lets the OS handle the dusk:// redirect naturally.
+    // _layout.tsx's Linking listener catches the deep link, calls exchangeCodeForSession,
+    // and triggers onAuthStateChange above.
+    // On Android, browser-close and deep-link fire almost simultaneously — wait briefly
+    // so the deep link handler has time to finish before we resolve null (user cancelled).
+    WebBrowser.openBrowserAsync(data.url).then(async () => {
       if (!done) {
-        done = true;
-        subscription.unsubscribe();
-        resolve(null);
+        await new Promise(r => setTimeout(r, 2000));
+        if (!done) {
+          done = true;
+          subscription.unsubscribe();
+          resolve(null);
+        }
       }
     }).catch((e: unknown) => {
       if (!done) {
