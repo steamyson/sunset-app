@@ -61,7 +61,7 @@ import { CropView } from "../../components/CropView";
 
 import type { Room } from "../../utils/supabase";
 
-const PRIVACY_POLICY_URL = (process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL ?? "").trim();
+const PRIVACY_POLICY_URL = "https://steamyson.github.io/sunset-app/";
 
 const { width: W, height: H } = Dimensions.get("window");
 
