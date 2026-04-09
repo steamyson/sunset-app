@@ -237,6 +237,13 @@ export async function sendPhoto({
 
   const lat = location?.lat != null ? roundStoredCoord(location.lat) : null;
   const lng = location?.lng != null ? roundStoredCoord(location.lng) : null;
+  if (lat == null || lng == null) {
+    throw new Error(
+      "Location is required to set sunset-based photo expiry. Enable location for Dusk in system settings and try again."
+    );
+  }
+
+  const { expires_at, sunset_date } = await getExpiresAt(lat, lng);
 
   const { error } = await supabase.from("messages").insert(
     rooms.map((room) => ({
@@ -247,7 +254,9 @@ export async function sendPhoto({
       lng,
       filter: filter ?? null,
       adjustments: adjustments ? JSON.stringify(adjustments) : null,
-      // capture_window: captureWindow ?? null, // migration not yet applied
+      expires_at,
+      sunset_date,
+      capture_window: captureWindow ?? null,
     }))
   );
 

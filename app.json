@@ -32,6 +32,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Dusk uses your location to calculate sunset-based photo expiry, show your photos on the map, and time golden hour near you.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
       "expo-secure-store",
       [
         "expo-notifications",
