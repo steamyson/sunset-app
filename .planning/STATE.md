@@ -98,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last activity: 2026-04-05 - Completed quick task 260405-lwr: Add My Map toggle to Send to sheet
-Stopped at: Completed quick-260405-lwr: Add My Map option to send-to sheet
+Last activity: 2026-04-09 - Completed quick task 260409-hd0: App Store submission fixes
+Stopped at: Completed quick-260409-hd0: App store submission fixes image-picker plugin, encryption declaration, privacy policy link, children age threshold
 Resume file: None
