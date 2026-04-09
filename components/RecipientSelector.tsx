@@ -81,15 +81,15 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
         {myMap && selected.size === 0
           ? "Save to your map"
           : myMap && selected.size > 0
-          ? `Send to ${selected.size} ${selected.size === 1 ? "room" : "rooms"} + save to map`
-          : "Choose which rooms get this sunset"}
+          ? `Send to ${selected.size} ${selected.size === 1 ? "cloud" : "clouds"} + save to map`
+          : "Choose which clouds get this sunset"}
       </Text>
 
       {rooms.length === 0 ? (
         <Text
           style={{ color: colors.ash, textAlign: "center", paddingVertical: 20 }}
         >
-          You haven't joined any rooms yet.
+          You haven't joined any clouds yet.
         </Text>
       ) : (
         <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
@@ -185,8 +185,8 @@ export default function RecipientSelector({ onSend, onCancel, sending }: Props) 
                 : myMap && selected.size === 0
                 ? "Save to My Map"
                 : selected.size === 0
-                ? "Select a room"
-                : `Send to ${selected.size} ${selected.size === 1 ? "room" : "rooms"}`}
+                ? "Select a cloud"
+                : `Send to ${selected.size} ${selected.size === 1 ? "cloud" : "clouds"}`}
             </Text>
           )}
         </TouchableOpacity>

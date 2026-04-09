@@ -140,7 +140,7 @@ function CloudShape({
   );
 }
 
-// ─── Room cloud (all gestures handled by parent) ──────────────────────────────
+// ─── Sky cloud (all gestures handled by parent) ──────────────────────────────
 type CloudProps = {
   name: string;
   width: number;

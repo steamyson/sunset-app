@@ -14,7 +14,6 @@ import {
   Image,
   ScrollView,
   BackHandler,
-  InteractionManager,
 } from "react-native";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -57,6 +56,7 @@ import {
   UNLOCK_CAMERA_FOR_TESTING,
 } from "../../utils/sunset";
 import { fetchMemberAvatars, DEFAULT_AVATAR, type Avatar } from "../../utils/avatar";
+import { runWhenIdle } from "../../utils/runWhenIdle";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -236,7 +236,7 @@ export default function RoomThread() {
     // Wait for the first rendered image to actually load before flashing
     if (!firstFeedImageReady) return;
     setUnreadFlashPending(false);
-    const handle = InteractionManager.runAfterInteractions(() => {
+    const handle = runWhenIdle(() => {
       runSunsetFlash(() => markRoomRead(code));
     });
     return () => handle.cancel();
@@ -359,7 +359,7 @@ export default function RoomThread() {
       ]);
       const room = roomRes.data;
       if (roomRes.error) throw new Error(roomRes.error.message);
-      if (!room) throw new Error("Room not found.");
+      if (!room) throw new Error("Cloud not found.");
 
       optimisticId = `__opt__${Date.now()}`;
       const optimistic: FeedPhoto = {
@@ -545,7 +545,7 @@ export default function RoomThread() {
     } catch (e: any) {
       console.error(e);
       if (reset) {
-        setLoadError(e.message ?? "Failed to load room messages.");
+        setLoadError(e.message ?? "Failed to load cloud messages.");
         setLoading(false);
       }
     } finally {
@@ -571,7 +571,7 @@ export default function RoomThread() {
       loadMessages(true);
       loadFeed(true);
       void hydrateRoomMeta();
-      const handle = InteractionManager.runAfterInteractions(() => setParticlesReady(true));
+      const handle = runWhenIdle(() => setParticlesReady(true));
       return () => { handle.cancel(); setParticlesReady(false); };
     }, [code])
   );
@@ -668,7 +668,7 @@ export default function RoomThread() {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } else {
-        await Share.share({ message: `Join my Dusk room with code: ${code}` });
+        await Share.share({ message: `Join my Dusk cloud with code: ${code}` });
       }
     } catch {}
   }
@@ -889,7 +889,7 @@ export default function RoomThread() {
             paddingHorizontal: 20,
             marginBottom: 10,
           }}>
-            In this room
+            In this cloud
           </Text>
           <ScrollView
             horizontal
@@ -912,7 +912,7 @@ export default function RoomThread() {
       ) : loadError ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
           <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
-            Couldn&apos;t load this room
+            Couldn&apos;t load this cloud
           </Text>
           <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
             {loadError}
@@ -1129,7 +1129,7 @@ export default function RoomThread() {
 
 const MEMBER_AVATAR_SIZE = 44;
 
-/** Empty photo feed — spring-in + gentle float and halo so the room doesn’t feel dead. */
+/** Empty photo feed — spring-in + gentle float and halo so the cloud doesn’t feel dead. */
 function EmptyRoomFeedState() {
   const containerOpacity = useRef(new Animated.Value(0)).current;
   const emojiFloat = useRef(new Animated.Value(0)).current;

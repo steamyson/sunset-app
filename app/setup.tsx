@@ -85,7 +85,7 @@ export default function SetupScreen() {
           fontSize: 15, color: colors.ash, textAlign: "center",
           lineHeight: 22, marginBottom: 40,
         }}>
-          Your name appears to friends in shared rooms.{"\n"}You can change it anytime.
+          Your name appears to friends in shared clouds.{"\n"}You can change it anytime.
         </Text>
 
         <TextInput

@@ -88,9 +88,9 @@ export default function FontPreview() {
 
           {/* UI text sample */}
           <View style={{ borderTopWidth: 1, borderTopColor: colors.mist, paddingTop: 14, gap: 6 }}>
-            <Text style={{ fontFamily: f.title, fontSize: 20, color: colors.charcoal }}>Join a Room</Text>
+            <Text style={{ fontFamily: f.title, fontSize: 20, color: colors.charcoal }}>Join a Cloud</Text>
             <Text style={{ fontFamily: f.body, fontSize: 13, color: colors.ash }}>enter a code from a friend</Text>
-            <Text style={{ fontFamily: f.title, fontSize: 20, color: colors.charcoal, marginTop: 6 }}>Create a Room</Text>
+            <Text style={{ fontFamily: f.title, fontSize: 20, color: colors.charcoal, marginTop: 6 }}>Create a Cloud</Text>
             <Text style={{ fontFamily: f.body, fontSize: 13, color: colors.ash }}>get a code to share with friends</Text>
           </View>
         </View>

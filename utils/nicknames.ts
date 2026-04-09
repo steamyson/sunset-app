@@ -2,7 +2,7 @@ import { getItem, setItem, safeJsonParse } from "./storage";
 
 const KEY = "dusk_nicknames";
 
-const DEFAULT_ROOM_NAMES = [
+const DEFAULT_CLOUD_NAMES = [
   "Grand Army Glow",
   "Delancey Dusk",
   "Atlantic Ember",
@@ -40,9 +40,9 @@ async function load(): Promise<Record<string, string>> {
   return safeJsonParse(raw, {} as Record<string, string>);
 }
 
-/** Picks a default display name for a new room (caller persists locally / on server). */
+/** Picks a default display name for a new cloud (caller persists locally / on server). */
 export function drawDefaultRoomNickname(): string {
-  return DEFAULT_ROOM_NAMES[Math.floor(Math.random() * DEFAULT_ROOM_NAMES.length)]!;
+  return DEFAULT_CLOUD_NAMES[Math.floor(Math.random() * DEFAULT_CLOUD_NAMES.length)]!;
 }
 
 export async function getRoomNickname(code: string): Promise<string | null> {

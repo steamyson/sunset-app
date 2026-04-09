@@ -232,7 +232,7 @@ export async function sendPhoto({
 
   if (roomResult.error) logAndThrow("sendPhoto.rooms", roomResult.error);
   const rooms = roomResult.data;
-  if (!rooms?.length) throw new Error("No matching rooms found.");
+  if (!rooms?.length) throw new Error("No matching clouds found.");
 
   const lat = location?.lat != null ? roundStoredCoord(location.lat) : null;
   const lng = location?.lng != null ? roundStoredCoord(location.lng) : null;
@@ -293,7 +293,7 @@ export async function fetchLatestMessageTimes(
 export async function fetchMessagesWithLocation(opts: {
   deviceId: string;
   roomIds: string[];
-  mode: "mine" | "rooms";
+  mode: "mine" | "clouds";
   range?: { from: number; to: number };
 }): Promise<Message[]> {
   const range = opts.range ?? { from: 0, to: 49 };

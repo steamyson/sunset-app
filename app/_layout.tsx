@@ -72,7 +72,7 @@ export default function RootLayout() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === ROOM_MEMBERSHIP_LIMIT_MESSAGE) {
-          Alert.alert("Couldn't join room", msg);
+          Alert.alert("Couldn't join cloud", msg);
         }
         // Other failures: invalid codes, etc. — keep silent for normal app flow.
       }

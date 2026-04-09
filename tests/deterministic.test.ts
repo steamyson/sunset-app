@@ -17,8 +17,8 @@ export function runDeterministicChecks(): void {
 
   const v1 = roomVariant("ABC123");
   const v2 = roomVariant("ABC123");
-  assert(v1 === v2, "Room variant should be deterministic.");
-  assert(v1 >= 0 && v1 < 8, "Room variant should always be within [0, 7].");
+  assert(v1 === v2, "Cloud variant should be deterministic.");
+  assert(v1 >= 0 && v1 < 8, "Cloud variant should always be within [0, 7].");
 
   const g1 = roomGlobePos("ABC123");
   const g2 = roomGlobePos("ABC123");

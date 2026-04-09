@@ -266,7 +266,7 @@ export default function CameraScreen() {
           Allow camera access
         </Text>
         <Text style={{ fontSize: 15, color: colors.ash, marginTop: 12, textAlign: "center", lineHeight: 24 }}>
-          Dusk uses your camera to capture sunsets and share them with your rooms — nothing is recorded automatically.
+          Dusk uses your camera to capture sunsets and share them with your clouds — nothing is recorded automatically.
         </Text>
         <TouchableOpacity
           onPress={requestPermission}

@@ -10,7 +10,6 @@ import {
   Animated,
   Easing as RNEasing,
   Dimensions,
-  InteractionManager,
   PanResponder,
   StyleSheet,
   KeyboardAvoidingView,
@@ -48,6 +47,7 @@ import { getLocalNickname } from "../../utils/identity";
 import { fetchLatestMessageTimes } from "../../utils/messages";
 import { getAllLastSeen } from "../../utils/lastSeen";
 import { colors, interaction, spacing } from "../../utils/theme";
+import { runWhenIdle } from "../../utils/runWhenIdle";
 import { SkyCloud, DecorativeCloud } from "../../components/SkyCloud";
 import { fetchMemberAvatars, type Avatar } from "../../utils/avatar";
 import type { Room } from "../../utils/supabase";
@@ -463,7 +463,7 @@ export default function ChatsScreen() {
     if (newIds === prevRoomIdStringRef.current) return;
     prevRoomIdStringRef.current = newIds;
 
-    const handle = InteractionManager.runAfterInteractions(() => {
+    const handle = runWhenIdle(() => {
 
     const currentRoomIds = new Set(displayRooms.map((r) => r.id));
     const newRoomIds = new Set<string>();
@@ -714,7 +714,7 @@ export default function ChatsScreen() {
     fitCloudsToView();
     lastFitRoomIdsRef.current = newIds;
 
-    }); // end InteractionManager.runAfterInteractions
+    });
 
     return () => handle.cancel();
   }, [rooms, cloudW, fitCloudsToView, positionsLoaded]);
@@ -733,7 +733,7 @@ export default function ChatsScreen() {
   );
 
   function markRoomReadAfterNav(roomCode: string) {
-    InteractionManager.runAfterInteractions(() => {
+    runWhenIdle(() => {
       setUnreadRooms((prev) => {
         const next = new Set(prev);
         next.delete(roomCode);
@@ -888,7 +888,7 @@ export default function ChatsScreen() {
     }, 2400);
 
     const tryBurst = (attempt: number) => {
-      InteractionManager.runAfterInteractions(() => {
+      runWhenIdle(() => {
         requestAnimationFrame(() => {
           const ref = cloudRefsRef.current[room.id];
           const scale = cloudScalesRef.current[room.id];
@@ -934,7 +934,7 @@ export default function ChatsScreen() {
 
   // ─── Room creation / joining ─────────────────────────────────────────────────
   async function handleJoinRoom() {
-    if (joinCode.trim().length < 6) { setAddError("Enter a 6-character room code."); return; }
+    if (joinCode.trim().length < 6) { setAddError("Enter a 6-character cloud code."); return; }
     setAddError(null);
     setAddLoading("join");
     try {
@@ -972,7 +972,7 @@ export default function ChatsScreen() {
   }
 
   async function handleShareCode(code: string) {
-    await Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${code}` });
+    await Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nCloud code: ${code}` });
   }
 
   // Tap cloud → navigate into room (or toggle selection when in select mode)
@@ -1313,8 +1313,8 @@ export default function ChatsScreen() {
               onPress={() => {
                 if (selectedRoomIds.size === 0) return;
                 Alert.alert(
-                  `Leave ${selectedRoomIds.size} room${selectedRoomIds.size === 1 ? "" : "s"}?`,
-                  "You can rejoin anytime with the room code.",
+                  `Leave ${selectedRoomIds.size} cloud${selectedRoomIds.size === 1 ? "" : "s"}?`,
+                  "You can rejoin anytime with the cloud code.",
                   [
                     { text: "Cancel", style: "cancel" },
                     { text: "Leave", style: "destructive", onPress: () => handleLeaveMultipleRooms(selectedRoomIds) },
@@ -1333,7 +1333,7 @@ export default function ChatsScreen() {
                 <ActivityIndicator color="white" size="small" />
               ) : (
                 <Text style={{ fontSize: 16, fontWeight: "700", color: "white" }}>
-                  Leave {selectedRoomIds.size} room{selectedRoomIds.size === 1 ? "" : "s"}
+                  Leave {selectedRoomIds.size} cloud{selectedRoomIds.size === 1 ? "" : "s"}
                 </Text>
               )}
             </TouchableOpacity>
@@ -1422,7 +1422,7 @@ export default function ChatsScreen() {
               onPress={() => setShowAddRoom(true)}
               style={{ marginTop: 24, backgroundColor: colors.ember, paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 }}
             >
-              <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Add a Room</Text>
+              <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Add a Cloud</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1460,7 +1460,7 @@ export default function ChatsScreen() {
           <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
             {newlyCreatedCode ? (
               <>
-                <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
+                <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>cloud created!</Text>
                 <TextInput
                   value={newCloudName}
                   onChangeText={setNewCloudName}
@@ -1476,7 +1476,7 @@ export default function ChatsScreen() {
                   }}
                 />
                 <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
-                  <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+                  <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>cloud code</Text>
                   <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{newlyCreatedCode}</Text>
                 </View>
                 {newCloudName.trim().length > 0 && (
@@ -1519,11 +1519,11 @@ export default function ChatsScreen() {
               </>
             ) : (
               <>
-                <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal, marginBottom: 20 }}>Add a Room</Text>
+                <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal, marginBottom: 20 }}>Add a Cloud</Text>
                 <TextInput
                   value={joinCode}
                   onChangeText={(t) => { setAddError(null); setJoinCode(t.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)); }}
-                  placeholder="ROOM CODE"
+                  placeholder="CLOUD CODE"
                   placeholderTextColor={colors.ash}
                   autoCapitalize="characters"
                   autoCorrect={false}
@@ -1545,7 +1545,7 @@ export default function ChatsScreen() {
                 >
                   {addLoading === "join"
                     ? <ActivityIndicator color={colors.cream} />
-                    : <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Join Room</Text>
+                    : <Text style={{ fontSize: 17, fontWeight: "800", color: colors.cream }}>Join Cloud</Text>
                   }
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -1556,7 +1556,7 @@ export default function ChatsScreen() {
                 >
                   {addLoading === "create"
                     ? <ActivityIndicator color={colors.ember} />
-                    : <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal }}>Create New Room</Text>
+                    : <Text style={{ fontSize: 17, fontWeight: "800", color: colors.charcoal }}>Create New Cloud</Text>
                   }
                 </TouchableOpacity>
               </>
@@ -1569,9 +1569,9 @@ export default function ChatsScreen() {
       <Modal visible={renaming !== null} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: "rgba(61,46,46,0.5)", alignItems: "center", justifyContent: "center", padding: 32 }}>
           <View style={{ backgroundColor: colors.cream, borderRadius: 24, padding: 28, width: "100%" }}>
-            <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 6 }}>Rename Room</Text>
+            <Text style={{ fontSize: 20, fontWeight: "800", color: colors.charcoal, marginBottom: 6 }}>Rename Cloud</Text>
             <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 20 }}>
-              Everyone in this room sees this name on their sky.
+              Everyone in this cloud sees this name on their sky.
             </Text>
             <TextInput
               value={renameInput}
@@ -1673,7 +1673,7 @@ const OptionsSheet = forwardRef<OptionsSheetHandle, {
             onPress={() => room && onShare(room.code)}
             style={{ flexDirection: "row", alignItems: "center", paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.mist }}
           >
-            <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Room Code</Text>
+            <Text style={{ fontSize: 16, color: colors.charcoal, fontWeight: "600", flex: 1 }}>Share Cloud Code</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1687,8 +1687,8 @@ const OptionsSheet = forwardRef<OptionsSheetHandle, {
             onPress={() => {
               if (!room) return;
               Alert.alert(
-                "Leave Room?",
-                "You can rejoin anytime with the room code.",
+                "Leave Cloud?",
+                "You can rejoin anytime with the cloud code.",
                 [
                   { text: "Cancel", style: "cancel" },
                   { text: "Leave", style: "destructive", onPress: () => onLeave(room) },
@@ -1700,7 +1700,7 @@ const OptionsSheet = forwardRef<OptionsSheetHandle, {
           >
             {leavingRoom
               ? <ActivityIndicator color={colors.magenta} />
-              : <Text style={{ fontSize: 16, color: colors.magenta, fontWeight: "600" }}>Leave Room</Text>
+              : <Text style={{ fontSize: 16, color: colors.magenta, fontWeight: "600" }}>Leave Cloud</Text>
             }
           </TouchableOpacity>
         </View>

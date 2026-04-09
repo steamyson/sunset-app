@@ -1,4 +1,4 @@
-import { fetchMyRooms } from "./rooms";
+import { fetchMyRooms } from "./fetchMyRooms";
 import type { Room } from "./supabase";
 import { getPhotosForRoom, fetchRoomMessagesByCode, getRoomId, type FeedPhoto, type Message } from "./messages";
 import { getNicknames } from "./identity";

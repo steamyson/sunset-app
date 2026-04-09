@@ -44,7 +44,7 @@ import { FilteredImage } from "../../components/FilteredImage";
 const SCREEN_W = Dimensions.get("window").width;
 const MAP_PAGE_SIZE = 100;
 
-type MapMode = "mine" | "rooms";
+type MapMode = "mine" | "clouds";
 
 // ─── Web fallback ────────────────────────────────────────────────────────────
 function WebFallback({ messages, mode, onToggle }: {
@@ -81,7 +81,7 @@ function ModeToggle({ mode, onToggle }: { mode: MapMode; onToggle: (m: MapMode) 
       backgroundColor: colors.mist,
       borderRadius: 16, padding: 4,
     }}>
-      {(["mine", "rooms"] as MapMode[]).map((m) => (
+      {(["mine", "clouds"] as MapMode[]).map((m) => (
         <TouchableOpacity
           key={m}
           onPress={() => onToggle(m)}
@@ -92,7 +92,7 @@ function ModeToggle({ mode, onToggle }: { mode: MapMode; onToggle: (m: MapMode) 
           }}
         >
           <Text style={{ fontSize: 13, fontWeight: "700", color: mode === m ? colors.cream : colors.ash }}>
-            {m === "mine" ? "✦ My Sunsets" : "◈ Room Sunsets"}
+            {m === "mine" ? "✦ My Sunsets" : "◈ Cloud Sunsets"}
           </Text>
         </TouchableOpacity>
       ))}

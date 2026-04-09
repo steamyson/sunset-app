@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
-  InteractionManager,
   Image,
   Animated,
   Easing,
@@ -42,6 +41,7 @@ import { FilteredImage } from "../../components/FilteredImage";
 import { colors, cloudShape, interaction, spacing } from "../../utils/theme";
 import { ParticleTrail, type ParticleTrailHandle } from "../../components/ParticleTrail";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
+import { runWhenIdle } from "../../utils/runWhenIdle";
 
 const SCREEN_W = W;
 const FEED_PAGE_SIZE = 30;
@@ -188,7 +188,7 @@ export default function FeedScreen() {
       if (!hasLoadedRef.current) setLoading(true);
       setHasMore(true);
       load(true);
-      const handle = InteractionManager.runAfterInteractions(() => setParticlesReady(true));
+      const handle = runWhenIdle(() => setParticlesReady(true));
       return () => { handle.cancel(); setParticlesReady(false); };
     }, [])
   );
@@ -333,9 +333,9 @@ export default function FeedScreen() {
 }
 
 const EMPTY_FEED_SUBTITLES = [
-  "When the next window opens, use the orange camera button below and share with your rooms.",
+  "When the next window opens, use the orange camera button below and share with your clouds.",
   "Nothing here yet — the sky is still gathering light. The camera button below is your way in.",
-  "Your rooms are ready. Catch the next golden hour and send the first photo from the tab bar camera.",
+  "Your clouds are ready. Catch the next golden hour and send the first photo from the tab bar camera.",
   "Golden hour photos from your clouds will land here. The big orange button below opens the camera.",
 ];
 

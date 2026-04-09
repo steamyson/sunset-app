@@ -4,13 +4,16 @@ import {
   Animated,
   Dimensions,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { openPrivacyPolicy } from "../utils/privacyPolicy";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { CropView } from "../components/CropView";
@@ -28,13 +31,22 @@ import { colors, spacing } from "../utils/theme";
 const { width: W, height: H } = Dimensions.get("window");
 const BASE_CLOUD_W = W * 0.54;
 const TOTAL_STEPS = 5;
+const SWIPE_THRESHOLD = 56;
 
 export default function OnboardingScreen() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, spacing.md) + spacing.sm;
   const [step, setStep] = useState(0);
+  const stepRef = useRef(0);
+  const animatingRef = useRef(false);
 
   // Step transition animation
   const contentOpacity = useRef(new Animated.Value(1)).current;
   const contentTranslateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
 
   // Dot animations
   const dotAnims = useRef(
@@ -52,15 +64,16 @@ export default function OnboardingScreen() {
     });
   }, [step]);
 
-  function advance() {
-    if (step >= TOTAL_STEPS - 1) return;
+  function runStepTransition(nextStep: number, fromOffsetY: number) {
+    if (animatingRef.current) return;
+    animatingRef.current = true;
     Animated.timing(contentOpacity, {
       toValue: 0,
       duration: 150,
       useNativeDriver: true,
     }).start(() => {
-      contentTranslateY.setValue(18);
-      setStep((s) => s + 1);
+      contentTranslateY.setValue(fromOffsetY);
+      setStep(nextStep);
       Animated.parallel([
         Animated.timing(contentOpacity, {
           toValue: 1,
@@ -72,9 +85,36 @@ export default function OnboardingScreen() {
           duration: 400,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]).start(({ finished }) => {
+        if (finished) animatingRef.current = false;
+      });
     });
   }
+
+  function advance() {
+    const s = stepRef.current;
+    if (s >= TOTAL_STEPS - 1) return;
+    runStepTransition(s + 1, 18);
+  }
+
+  /** Swipe left (finger moves left, dx negative) → next. Swipe right → back. */
+  const swipePan = PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, g) =>
+      Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 12,
+    onMoveShouldSetPanResponderCapture: (_, g) =>
+      Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 12,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderRelease: (_, g) => {
+      if (animatingRef.current) return;
+      const s = stepRef.current;
+      if (g.dx <= -SWIPE_THRESHOLD && s < TOTAL_STEPS - 1) {
+        runStepTransition(s + 1, 18);
+      } else if (g.dx >= SWIPE_THRESHOLD && s > 0) {
+        runStepTransition(s - 1, -18);
+      }
+    },
+  });
 
   async function complete() {
     const photoUriStored = await getItem("profile_photo_uri");
@@ -106,47 +146,64 @@ export default function OnboardingScreen() {
     <View style={styles.root}>
       {/* Skip link for steps 1-3 */}
       {step >= 1 && step <= 3 && (
-        <TouchableOpacity style={styles.skipHeader} onPress={skip} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={[styles.skipHeader, { top: insets.top + spacing.md }]}
+          onPress={skip}
+          activeOpacity={0.7}
+        >
           <Text style={styles.skipText}>skip</Text>
         </TouchableOpacity>
       )}
 
-      <Animated.View
-        style={[
-          styles.content,
-          {
-            opacity: contentOpacity,
-            transform: [{ translateY: contentTranslateY }],
-          },
-        ]}
-      >
-        {renderStep()}
-      </Animated.View>
+      <View style={styles.swipeArea} {...swipePan.panHandlers}>
+        <Animated.View
+          style={[
+            styles.content,
+            { paddingBottom: bottomPad },
+            {
+              opacity: contentOpacity,
+              transform: [{ translateY: contentTranslateY }],
+            },
+          ]}
+        >
+          {renderStep()}
+        </Animated.View>
 
-      {/* Step dots */}
-      <View style={styles.dotsRow}>
-        {dotAnims.map((anim, i) => {
-          const dotWidth = anim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [8, 18],
-          });
-          const dotColor = anim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [colors.mist, colors.ember],
-          });
-          return (
-            <Animated.View
-              key={i}
-              style={[
-                styles.dot,
-                {
-                  width: dotWidth,
-                  backgroundColor: dotColor,
-                },
-              ]}
-            />
-          );
-        })}
+        {/* Step dots */}
+        <View style={[styles.dotsRow, { paddingBottom: spacing.xs }]}>
+          {dotAnims.map((anim, i) => {
+            const dotWidth = anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [8, 18],
+            });
+            const dotColor = anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [colors.mist, colors.ember],
+            });
+            return (
+              <Animated.View
+                key={i}
+                style={[
+                  styles.dot,
+                  {
+                    width: dotWidth,
+                    backgroundColor: dotColor,
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+
+        <TouchableOpacity
+          onPress={() => void openPrivacyPolicy()}
+          activeOpacity={0.7}
+          style={[styles.privacyFooter, { paddingBottom: bottomPad }]}
+          accessibilityRole="link"
+          accessibilityLabel="Open privacy policy"
+        >
+          <Text style={styles.privacyFooterText}>Privacy policy</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -192,6 +249,7 @@ function StepWelcome({ onAdvance }: { onAdvance: () => void }) {
 // ─── Step 1: Profile photo ───────────────────────────────────────────────────
 
 function StepProfile({ onAdvance }: { onAdvance: () => void }) {
+  const camInsets = useSafeAreaInsets();
   const circleSize = W * 0.45;
   /** Last file we wrote (for replacing on retake). */
   const lastPersistedPathRef = useRef<string | null>(null);
@@ -367,13 +425,13 @@ function StepProfile({ onAdvance }: { onAdvance: () => void }) {
               onCameraReady={() => setCameraReady(true)}
             />
             <TouchableOpacity
-              style={styles.onboardCamClose}
+              style={[styles.onboardCamClose, { top: Math.max(56, camInsets.top + spacing.md) }]}
               onPress={closeFaceModal}
               activeOpacity={0.8}
             >
               <Text style={styles.onboardCamCloseText}>✕</Text>
             </TouchableOpacity>
-            <View style={styles.onboardCamShutterWrap}>
+            <View style={[styles.onboardCamShutterWrap, { bottom: camInsets.bottom + spacing.xl }]}>
               <TouchableOpacity
                 onPress={captureFromInAppCamera}
                 disabled={!cameraReady}
@@ -414,15 +472,15 @@ function StepClouds({ onAdvance }: { onAdvance: () => void }) {
       <View style={styles.cloudStage}>
         {/* Ghost cloud behind — no label so drifting doesn’t reveal duplicate text */}
         <Animated.View style={[styles.ghostCloud, { opacity: ghostOpacity }]}>
-          <SkyCloud variant={2} width={BASE_CLOUD_W} name="another room" hideLabel />
+          <SkyCloud variant={2} width={BASE_CLOUD_W} name="another cloud" hideLabel />
         </Animated.View>
         {/* Main drifting cloud */}
         <Animated.View style={{ transform: [{ translateX: driftAnim }] }}>
-          <SkyCloud variant={2} width={BASE_CLOUD_W} name="your room" hideLabel={false} />
+          <SkyCloud variant={2} width={BASE_CLOUD_W} name="your cloud" hideLabel={false} />
         </Animated.View>
       </View>
       <Text style={styles.bodyText}>
-        rooms are clouds. each one holds a group and their photos. tap to enter. drag to move them around your sky.
+        each cloud holds a group and their photos. tap to enter. drag to move them around your sky.
       </Text>
       <TouchableOpacity style={[styles.btnPrimary, { marginTop: spacing.lg }]} onPress={onAdvance} activeOpacity={0.8}>
         <Text style={styles.btnPrimaryText}>got it</Text>
@@ -511,9 +569,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.cream,
   },
+  swipeArea: {
+    flex: 1,
+  },
   skipHeader: {
     position: "absolute",
-    top: 56,
     right: spacing.lg,
     zIndex: 10,
   },
@@ -535,6 +595,15 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
+  privacyFooter: {
+    alignSelf: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  privacyFooterText: {
+    fontSize: 13,
+    color: colors.ash,
+    textDecorationLine: "underline",
+  },
 
   // Shared step layouts
   stepFull: {
@@ -542,15 +611,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: spacing.xl,
-    paddingTop: H * 0.15,
-    paddingBottom: spacing.xl,
+    paddingTop: H * 0.12,
+    paddingBottom: spacing.lg,
   },
   stepPadded: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.lg,
     gap: spacing.md,
   },
   centerGroup: {
@@ -705,7 +774,6 @@ const styles = StyleSheet.create({
   },
   onboardCamClose: {
     position: "absolute",
-    top: 56,
     left: spacing.lg,
     width: 44,
     height: 44,
@@ -721,7 +789,6 @@ const styles = StyleSheet.create({
   },
   onboardCamShutterWrap: {
     position: "absolute",
-    bottom: 56,
     left: 0,
     right: 0,
     alignItems: "center",

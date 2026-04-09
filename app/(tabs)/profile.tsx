@@ -16,7 +16,6 @@ import {
   Share,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import * as Linking from "expo-linking";
 import { Text } from "../../components/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -55,13 +54,12 @@ import {
   cancelSunsetAlert,
 } from "../../utils/notifications";
 import { colors, interaction, spacing } from "../../utils/theme";
+import { openPrivacyPolicy } from "../../utils/privacyPolicy";
 import { CloudCard } from "../../components/CloudCard";
 import { SunGlow, useSunGlowAnimation } from "../../components/SunGlow";
 import { CropView } from "../../components/CropView";
 
 import type { Room } from "../../utils/supabase";
-
-const PRIVACY_POLICY_URL = "https://steamyson.github.io/sunset-app/";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -306,7 +304,7 @@ export default function ProfileScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === ROOM_MEMBERSHIP_LIMIT_MESSAGE) {
-        Alert.alert("Room limit", msg);
+        Alert.alert("Cloud limit", msg);
       } else {
         console.error(e);
       }
@@ -318,15 +316,6 @@ export default function ProfileScreen() {
   function dismissCreatedModal() {
     setNewlyCreatedCode(null);
     setNewCloudName("");
-  }
-
-  async function openPrivacyPolicy() {
-    if (!PRIVACY_POLICY_URL) return;
-    try {
-      await Linking.openURL(PRIVACY_POLICY_URL);
-    } catch {
-      Alert.alert("Could not open link", "Please try again or visit our website.");
-    }
   }
 
   async function handleGoogleSignIn() {
@@ -381,7 +370,7 @@ export default function ProfileScreen() {
         const nickMap = await syncLocalNicknamesFromRooms(roomList);
         setRooms(roomList);
         setRoomNicknames(nickMap);
-        Alert.alert("Rooms restored!", `${restored} room${restored === 1 ? "" : "s"} recovered from your previous device.`);
+        Alert.alert("Clouds restored!", `${restored} cloud${restored === 1 ? "" : "s"} recovered from your previous device.`);
       }
     } catch (e: any) {
       setAuthError(e.message ?? "Invalid code. Please try again.");
@@ -391,7 +380,7 @@ export default function ProfileScreen() {
   }
 
   async function handleSignOut() {
-    Alert.alert("Sign out", "Your rooms will stay on this device.", [
+    Alert.alert("Sign out", "Your clouds will stay on this device.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
@@ -408,7 +397,7 @@ export default function ProfileScreen() {
   function handleDeleteAccount() {
     Alert.alert(
       "Delete account?",
-      "This permanently deletes your login and removes your photos, messages, and server nickname for devices linked to this account. Local room shortcuts on this phone are cleared. You can keep using Dusk without signing in.",
+      "This permanently deletes your login and removes your photos, messages, and server nickname for devices linked to this account. Local cloud shortcuts on this phone are cleared. You can keep using Dusk without signing in.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -536,7 +525,7 @@ export default function ProfileScreen() {
         </View>
         </CloudCard>
 
-        {/* Account — above rooms so sign out / delete stay discoverable */}
+        {/* Account — above cloud list so sign out / delete stay discoverable */}
         <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>
           Account
         </Text>
@@ -553,7 +542,7 @@ export default function ProfileScreen() {
                 </View>
               </View>
               <Text style={{ fontSize: 13, color: colors.ash, lineHeight: 18, marginBottom: 16 }}>
-                Your rooms are safe. Sign in with this email on a new device to restore everything.
+                Your clouds are safe. Sign in with this email on a new device to restore everything.
               </Text>
               <TouchableOpacity onPress={handleSignOut} style={{ alignSelf: "flex-start" }} disabled={deletingAccount}>
                 <Text style={{ fontSize: 13, fontWeight: "700", color: colors.magenta }}>Sign Out</Text>
@@ -603,7 +592,7 @@ export default function ProfileScreen() {
             </>
           ) : authStep === "email" ? (
             <>
-              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal, marginBottom: 4 }}>Back up your rooms</Text>
+              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal, marginBottom: 4 }}>Back up your clouds</Text>
               <Text style={{ fontSize: 13, color: colors.ash, marginBottom: 16 }}>If you lose your phone, sign in with this email to restore everything.</Text>
               <TextInput
                 value={authEmail}
@@ -639,7 +628,7 @@ export default function ProfileScreen() {
                 <Text style={{ fontSize: 24 }}>🔓</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: "700", color: colors.charcoal }}>No account yet</Text>
-                  <Text style={{ fontSize: 13, color: colors.ash, marginTop: 2 }}>Your rooms only exist on this device</Text>
+                  <Text style={{ fontSize: 13, color: colors.ash, marginTop: 2 }}>Your clouds only exist on this device</Text>
                 </View>
               </View>
               {authError && <Text style={{ color: colors.magenta, fontSize: 13, marginBottom: 12 }}>{authError}</Text>}
@@ -687,10 +676,10 @@ export default function ProfileScreen() {
           </CloudCard>
         )}
 
-        {/* Rooms */}
+        {/* Clouds */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ash, letterSpacing: 1.5, textTransform: "uppercase" }}>
-            My Rooms
+            My Clouds
           </Text>
           <TouchableOpacity
             onPress={handleCreateRoom}
@@ -699,7 +688,7 @@ export default function ProfileScreen() {
           >
             {creatingRoom
               ? <ActivityIndicator color={colors.ember} size="small" />
-              : <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ember }}>+ New Room</Text>
+              : <Text style={{ fontSize: 13, fontWeight: "700", color: colors.ember }}>+ New Cloud</Text>
             }
           </TouchableOpacity>
         </View>
@@ -707,7 +696,7 @@ export default function ProfileScreen() {
         <View style={{ gap: 10, marginBottom: 24 }}>
           {rooms.length === 0 ? (
             <Text style={{ color: colors.ash, fontSize: 14, textAlign: "center", paddingVertical: 20 }}>
-              No rooms yet — create or join one from the home screen.
+              No clouds yet — create or join one from the home screen.
             </Text>
           ) : rooms.map((room, i) => {
             const rNick = roomNicknames[room.code] ?? room.nickname;
@@ -782,29 +771,25 @@ export default function ProfileScreen() {
           <View style={{ padding: 20 }}>
             <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>About Dusk</Text>
             <Text style={{ fontSize: 13, color: colors.ash, marginTop: 3, lineHeight: 18 }}>
-              Photos expire after 24 hours. Back up your rooms with an email to restore them on any device.
+              Photos expire after 24 hours. Back up your clouds with an email to restore them on any device.
             </Text>
           </View>
 
-          {PRIVACY_POLICY_URL ? (
-            <>
-              <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
-              <TouchableOpacity
-                onPress={openPrivacyPolicy}
-                activeOpacity={interaction.activeOpacity}
-                style={{
-                  paddingVertical: 18,
-                  paddingHorizontal: 20,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
-                <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
-              </TouchableOpacity>
-            </>
-          ) : null}
+          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+          <TouchableOpacity
+            onPress={() => void openPrivacyPolicy()}
+            activeOpacity={interaction.activeOpacity}
+            style={{
+              paddingVertical: 18,
+              paddingHorizontal: 20,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
+            <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
+          </TouchableOpacity>
 
           <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
           <TouchableOpacity
@@ -948,8 +933,8 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Leave room confirm modal */}
-      {/* Room created modal — name + code */}
+      {/* Leave cloud confirm modal */}
+      {/* Cloud created modal — name + code */}
       <Modal visible={newlyCreatedCode !== null} transparent animationType="slide" onRequestClose={dismissCreatedModal}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <TouchableOpacity
@@ -958,7 +943,7 @@ export default function ProfileScreen() {
             onPress={dismissCreatedModal}
           />
           <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
-            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
+            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>cloud created!</Text>
             <TextInput
               value={newCloudName}
               onChangeText={setNewCloudName}
@@ -974,7 +959,7 @@ export default function ProfileScreen() {
               }}
             />
             <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>cloud code</Text>
               <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{newlyCreatedCode}</Text>
             </View>
             {newCloudName.trim().length > 0 && (
@@ -1001,7 +986,7 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              onPress={() => Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${newlyCreatedCode}` })}
+              onPress={() => Share.share({ message: `Join me on Dusk to catch the golden hour! 🌅\n\nCloud code: ${newlyCreatedCode}` })}
               style={{ backgroundColor: newCloudName.trim().length > 0 ? colors.sky : colors.ember, borderRadius: 16, paddingVertical: 18, alignItems: "center", marginBottom: 12 }}
             >
               <Text style={{ fontSize: 17, fontWeight: "800", color: newCloudName.trim().length > 0 ? colors.charcoal : colors.cream }}>Share Code</Text>
@@ -1023,7 +1008,7 @@ export default function ProfileScreen() {
               Leave {leavingRoom?.code}?
             </Text>
             <Text style={{ fontSize: 14, color: colors.ash, marginBottom: 24, lineHeight: 20 }}>
-              You'll no longer see photos sent to this room. You can rejoin anytime with the code.
+              You'll no longer see photos sent to this cloud. You can rejoin anytime with the code.
             </Text>
             <View style={{ flexDirection: "row", gap: 12 }}>
               <TouchableOpacity
@@ -1036,7 +1021,7 @@ export default function ProfileScreen() {
                 onPress={() => leavingRoom && handleLeaveRoom(leavingRoom)}
                 style={{ flex: 2, padding: 14, borderRadius: 12, backgroundColor: colors.magenta, alignItems: "center" }}
               >
-                <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Leave Room</Text>
+                <Text style={{ color: "white", fontWeight: "700", fontSize: 15 }}>Leave Cloud</Text>
               </TouchableOpacity>
             </View>
           </View>

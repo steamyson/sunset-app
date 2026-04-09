@@ -37,13 +37,13 @@ export async function sendPhotoNotifications({
     if (!devices?.length) return;
 
     const senderName = await getLocalNickname();
-    const roomLabel =
-      roomCodes.length === 1 ? `room ${roomCodes[0]}` : `${roomCodes.length} rooms`;
+    const cloudLabel =
+      roomCodes.length === 1 ? `cloud ${roomCodes[0]}` : `${roomCodes.length} clouds`;
 
     const messages = devices.map((d) => ({
       to: d.push_token,
       title: "🌅 New sunset shared",
-      body: `${senderName ?? "Someone"} just posted in ${roomLabel}`,
+      body: `${senderName ?? "Someone"} just posted in ${cloudLabel}`,
       data: { roomCode: roomCodes[0] },
       sound: "default",
     }));

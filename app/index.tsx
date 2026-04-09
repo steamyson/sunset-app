@@ -59,13 +59,13 @@ export default function EntryScreen() {
   async function handleShare() {
     if (!createdCode) return;
     await Share.share({
-      message: `Join me on Dusk to catch the golden hour! 🌅\n\nRoom code: ${createdCode}`,
+      message: `Join me on Dusk to catch the golden hour! 🌅\n\nCloud code: ${createdCode}`,
     });
   }
 
   async function handleJoin() {
     if (code.trim().length < 6) {
-      setError("Enter a 6-character room code.");
+      setError("Enter a 6-character cloud code.");
       return;
     }
     setError(null);
@@ -144,7 +144,7 @@ export default function EntryScreen() {
               setError(null);
               setCode(t.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6));
             }}
-            placeholder="ROOM CODE"
+            placeholder="CLOUD CODE"
             placeholderTextColor={colors.ash}
             autoCapitalize="characters"
             autoCorrect={false}
@@ -179,7 +179,7 @@ export default function EntryScreen() {
 
         {/* Cards */}
         <View style={{ width: "100%", zIndex: 1 }}>
-          {/* Join Room */}
+          {/* Join cloud */}
           <CloudCard seed={0} bg={colors.charcoal}>
           <TouchableOpacity
             onPress={handleJoin}
@@ -193,7 +193,7 @@ export default function EntryScreen() {
               <>
                 <Text style={{ fontSize: 28, marginBottom: 6 }}>🌅</Text>
                 <Text style={{ fontSize: 22, fontWeight: "800", color: colors.cream, textAlign: "center" }}>
-                  Join a Room
+                  Join a Cloud
                 </Text>
                 <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4, textAlign: "center" }}>
                   enter a code from a friend
@@ -203,7 +203,7 @@ export default function EntryScreen() {
           </TouchableOpacity>
           </CloudCard>
 
-          {/* Create Room */}
+          {/* Create cloud */}
           <CloudCard seed={1}>
           <TouchableOpacity
             onPress={handleCreate}
@@ -217,7 +217,7 @@ export default function EntryScreen() {
               <>
                 <Text style={{ fontSize: 28, marginBottom: 6 }}>✨</Text>
                 <Text style={{ fontSize: 22, fontWeight: "800", color: colors.charcoal, textAlign: "center" }}>
-                  Create a Room
+                  Create a Cloud
                 </Text>
                 <Text style={{ fontSize: 13, color: colors.ash, marginTop: 4, textAlign: "center" }}>
                   get a code to share with friends
@@ -230,7 +230,7 @@ export default function EntryScreen() {
       </View>
       </KeyboardAvoidingView>
 
-      {/* Room created — same pattern as Profile / Chats (name, code below) */}
+      {/* Cloud created — same pattern as Profile / Chats (name, code below) */}
       <Modal
         visible={createdCode !== null}
         transparent
@@ -244,7 +244,7 @@ export default function EntryScreen() {
             onPress={finishEntryAfterCreate}
           />
           <View style={{ backgroundColor: colors.cream, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48 }}>
-            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>room created!</Text>
+            <Text style={{ fontSize: 13, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>cloud created!</Text>
             <TextInput
               value={newCloudName}
               onChangeText={setNewCloudName}
@@ -260,7 +260,7 @@ export default function EntryScreen() {
               }}
             />
             <View style={{ backgroundColor: colors.sky, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>room code</Text>
+              <Text style={{ fontSize: 11, color: colors.ash, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>cloud code</Text>
               <Text style={{ fontSize: 28, fontWeight: "900", color: colors.charcoal, letterSpacing: 8 }}>{createdCode}</Text>
             </View>
             {newCloudName.trim().length > 0 && (

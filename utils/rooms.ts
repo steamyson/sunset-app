@@ -1,4 +1,24 @@
 import { supabase, Room } from "./supabase";
+import { getDeviceId } from "./device";
+import {
+  drawDefaultRoomNickname,
+  setRoomNickname as setLocalRoomNickname,
+} from "./nicknames";
+import { invalidateRoomCache } from "./roomCache";
+import {
+  getLocalRoomCodes,
+  addLocalRoomCode,
+  removeLocalRoomCode,
+  clearAllLocalRooms,
+} from "./localRoomCodes";
+
+export {
+  getLocalRoomCodes,
+  addLocalRoomCode,
+  removeLocalRoomCode,
+  clearAllLocalRooms,
+} from "./localRoomCodes";
+export { fetchMyRooms } from "./fetchMyRooms";
 
 const GENERIC_ERR = "Something went wrong. Please try again.";
 
@@ -6,7 +26,7 @@ const GENERIC_ERR = "Something went wrong. Please try again.";
 export const MAX_ROOMS_PER_DEVICE = 8;
 
 export const ROOM_MEMBERSHIP_LIMIT_MESSAGE =
-  "You can be in up to 8 rooms at once. Leave one to add another.";
+  "You can be in up to 8 clouds at once. Leave one to add another.";
 
 function isRoomLimitBackendMessage(msg: string | undefined): boolean {
   return (msg ?? "").includes("ROOM_MEMBERSHIP_LIMIT");
@@ -27,43 +47,12 @@ export async function countMembershipRooms(deviceId: string): Promise<number> {
   if (error) logAndThrow("countMembershipRooms", error);
   return typeof data === "number" ? data : 0;
 }
-import { getDeviceId } from "./device";
-import { getItem, setItem, safeJsonParse } from "./storage";
-import {
-  drawDefaultRoomNickname,
-  setRoomNickname as setLocalRoomNickname,
-} from "./nicknames";
-import { invalidateRoomCache } from "./roomCache";
-
-const LOCAL_ROOMS_KEY = "dusk_rooms";
-
-let cachedLocalCodes: string[] | null = null;
 
 function generateCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({ length: 6 }, () =>
     chars[Math.floor(Math.random() * chars.length)]
   ).join("");
-}
-
-export async function getLocalRoomCodes(): Promise<string[]> {
-  if (cachedLocalCodes) return cachedLocalCodes;
-  const raw = await getItem(LOCAL_ROOMS_KEY);
-  const codes: string[] = safeJsonParse(raw, []);
-  cachedLocalCodes = codes;
-  return codes;
-}
-
-function invalidateLocalCodesCache() {
-  cachedLocalCodes = null;
-}
-
-export async function addLocalRoomCode(code: string) {
-  const codes = await getLocalRoomCodes();
-  if (!codes.includes(code)) {
-    invalidateLocalCodesCache();
-    await setItem(LOCAL_ROOMS_KEY, JSON.stringify([...codes, code]));
-  }
 }
 
 export async function createRoom(): Promise<Room> {
@@ -90,7 +79,7 @@ export async function createRoom(): Promise<Room> {
     code = generateCode();
   }
   if (attempts >= MAX_CODE_RETRIES) {
-    throw new Error("Unable to generate a unique room code. Please try again.");
+    throw new Error("Unable to generate a unique cloud code. Please try again.");
   }
 
   const nickname = drawDefaultRoomNickname();
@@ -125,7 +114,7 @@ export async function joinRoom(code: string): Promise<Room> {
     p_device_id: deviceId,
   });
   if (error) logAndThrow("joinRoom", error);
-  if (!rpcResult) throw new Error("Room not found. Check the code and try again.");
+  if (!rpcResult) throw new Error("Cloud not found. Check the code and try again.");
 
   // RPC no longer returns members to avoid leaking device IDs.
   // Fetch the full room via direct table query (allowed since device is now a member).
@@ -164,20 +153,6 @@ export async function joinRoom(code: string): Promise<Room> {
   return joined;
 }
 
-export async function fetchMyRooms(): Promise<Room[]> {
-  const codes = await getLocalRoomCodes();
-  if (codes.length === 0) return [];
-
-  const { data, error } = await supabase
-    .from("rooms")
-    .select("*")
-    .in("code", codes)
-    .order("created_at", { ascending: false });
-
-  if (error) logAndThrow("fetchMyRooms", error);
-  return (data ?? []) as Room[];
-}
-
 /** Updates shared room display name for all members (Supabase + local cache). */
 export async function syncSharedRoomNickname(code: string, nickname: string) {
   const trimmed = nickname.trim();
@@ -187,18 +162,6 @@ export async function syncSharedRoomNickname(code: string, nickname: string) {
   if (error) logAndThrow("syncSharedRoomNickname", error);
   await setLocalRoomNickname(upper, trimmed);
   invalidateRoomCache();
-}
-
-/** Clear saved room codes on device (e.g. after account deletion). */
-export async function clearAllLocalRooms(): Promise<void> {
-  invalidateLocalCodesCache();
-  await setItem(LOCAL_ROOMS_KEY, JSON.stringify([]));
-}
-
-export async function removeLocalRoomCode(code: string): Promise<void> {
-  const codes = await getLocalRoomCodes();
-  invalidateLocalCodesCache();
-  await setItem(LOCAL_ROOMS_KEY, JSON.stringify(codes.filter((c) => c !== code)));
 }
 
 export async function leaveRoom(code: string): Promise<void> {
