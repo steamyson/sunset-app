@@ -182,12 +182,11 @@ export async function saveToMyMap(opts: {
     uploadPhoto(opts.uri, opts.deviceId),
     getLocation(),
   ]);
-  const { data: urlData } = supabase.storage.from("photos").getPublicUrl(photoPath);
   const pin: Message = {
     id: `local_${Date.now()}`,
     sender_device_id: opts.deviceId,
     room_id: "",
-    photo_url: urlData.publicUrl,
+    photo_url: photoPath,
     created_at: new Date().toISOString(),
     lat: location?.lat != null ? roundStoredCoord(location.lat) : null,
     lng: location?.lng != null ? roundStoredCoord(location.lng) : null,
