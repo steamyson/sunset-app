@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.akivagroener.dusk"
+      "bundleIdentifier": "com.akivagroener.dusk",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -49,6 +52,12 @@
         }
       ],
       "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Dusk needs photo library access to set your profile photo."
+        }
+      ],
       [
         "react-native-vision-camera",
         {
