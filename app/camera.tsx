@@ -7,6 +7,7 @@ import {
   Dimensions,
   PanResponder,
   Animated,
+  StyleSheet,
 } from "react-native";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -37,8 +38,10 @@ import {
   nextGoldenHourWindow,
   activeWindow,
   formatSunsetTime,
+  type GoldenHourWindow,
   UNLOCK_CAMERA_FOR_TESTING,
 } from "../utils/sunset";
+import { SadGateCloud } from "../components/SadGateCloud";
 
 const SLIDER_H = 200;
 
@@ -71,7 +74,7 @@ export default function CameraScreen() {
   // Golden hour gate
   const [goldenHour, setGoldenHour] = useState<"checking" | "open" | "closed">("checking");
   const [sunsetLabel, setSunsetLabel] = useState<string | null>(null);
-  const [windowOpensLabel, setWindowOpensLabel] = useState<string | null>(null);
+  const [nextUnlockWindow, setNextUnlockWindow] = useState<GoldenHourWindow | null>(null);
 
   useEffect(() => {
     if (UNLOCK_CAMERA_FOR_TESTING) {
@@ -81,8 +84,7 @@ export default function CameraScreen() {
     fetchSunsetTime().then((info) => {
       if (!info) { setGoldenHour("open"); return; }
       setSunsetLabel(info.formattedLocal);
-      const next = nextGoldenHourWindow(info);
-      setWindowOpensLabel(`${formatSunsetTime(next.startsAt)} · ${next.label}`);
+      setNextUnlockWindow(nextGoldenHourWindow(info));
       setGoldenHour(isWithinAnyGoldenHour(info) ? "open" : "closed");
     });
   }, []);
@@ -229,25 +231,100 @@ export default function CameraScreen() {
 
   // Outside golden hour — hard block
   if (goldenHour === "closed") {
+    const unlockAt = nextUnlockWindow?.startsAt;
+    const unlockStr = unlockAt ? formatSunsetTime(unlockAt) : null;
+    let etaTail = "";
+    if (unlockAt) {
+      const mins = Math.max(0, Math.ceil((unlockAt.getTime() - Date.now()) / 60000));
+      if (mins <= 1) etaTail = "less than a minute away";
+      else {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const hm = h > 0 ? `${h}h ${m}m` : `${m}m`;
+        etaTail = `about ${hm} away`;
+      }
+    }
+
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.sky, alignItems: "center", justifyContent: "center", padding: 36 }}>
-        <Text style={{ fontSize: 72, lineHeight: 80 }}>🌇</Text>
-        <Text style={{ fontSize: 26, fontWeight: "800", color: colors.charcoal, marginTop: 20, textAlign: "center", letterSpacing: -0.5 }}>
-          Not quite golden hour
+      <SafeAreaView
+        style={{
+          flex: 1,
+          backgroundColor: colors.cream,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 28,
+          paddingVertical: 36,
+        }}
+      >
+        <View style={{ alignItems: "center", marginBottom: 32 }}>
+          <SadGateCloud />
+        </View>
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: "500",
+            color: colors.charcoal,
+            textAlign: "center",
+            textTransform: "lowercase",
+          }}
+        >
+          not quite golden hour
         </Text>
-        <Text style={{ fontSize: 15, color: colors.ash, marginTop: 12, textAlign: "center", lineHeight: 24 }}>
-          Photos unlock during golden hour at sunrise and sunset. Come back when the next window opens.
+        <Text
+          style={{
+            fontSize: 14,
+            fontStyle: "italic",
+            color: colors.ash,
+            textAlign: "center",
+            maxWidth: 230,
+            lineHeight: 23,
+            marginTop: 10,
+          }}
+        >
+          photos unlock during the golden window around sunrise and sunset
         </Text>
-        {sunsetLabel && (
-          <View style={{ marginTop: 28, backgroundColor: colors.ember, paddingHorizontal: 28, paddingVertical: 16, borderRadius: 20 }}>
-            <Text style={{ color: "white", fontWeight: "800", fontSize: 16, textAlign: "center" }}>
-              Today&apos;s sunset: {sunsetLabel}
-            </Text>
-            {windowOpensLabel && (
-              <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, textAlign: "center", marginTop: 4 }}>
-                Camera unlocks at {windowOpensLabel}
+        {sunsetLabel && unlockStr && (
+          <View
+            style={{
+              marginTop: 28,
+              width: "100%",
+              maxWidth: 320,
+              borderRadius: 16,
+              backgroundColor: colors.paperPeach,
+              borderWidth: 0.5,
+              borderColor: colors.ash,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+              <Text style={{ fontSize: 12, color: colors.ash, textTransform: "lowercase" }}>today&apos;s sunset</Text>
+              <Text style={{ fontSize: 15, fontWeight: "500", color: colors.charcoal }}>{sunsetLabel}</Text>
+            </View>
+            <View
+              style={{
+                height: StyleSheet.hairlineWidth,
+                backgroundColor: colors.ash,
+                opacity: 0.35,
+                marginVertical: 12,
+              }}
+            />
+            <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+              <View
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: 50,
+                  backgroundColor: colors.ember,
+                  opacity: 0.6,
+                  marginTop: 5,
+                  marginRight: 8,
+                }}
+              />
+              <Text style={{ flex: 1, fontSize: 13, fontStyle: "italic", color: colors.ash, lineHeight: 20 }}>
+                camera unlocks at {unlockStr} · {etaTail}
               </Text>
-            )}
+            </View>
           </View>
         )}
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 28 }}>
