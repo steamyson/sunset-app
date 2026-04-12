@@ -6,21 +6,22 @@ const mapStyle = [
   { elementType: "labels.text.fill", stylers: [{ color: "#5C3822" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#F2E0C0" }, { weight: 4 }] },
 
-  // ── Local roads — clean white ──────────────────────────
-  { featureType: "road.local", elementType: "geometry.fill", stylers: [{ color: "#FFFFFF" }] },
-  { featureType: "road.local", elementType: "geometry.stroke", stylers: [{ color: "#DCC4A0" }, { weight: 1.5 }] },
-  { featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9A7050" }] },
+  // ── Roads: quieter — near-land fills, min stroke weight, less label noise ──
+  { featureType: "road.local", stylers: [{ visibility: "simplified" }] },
+  { featureType: "road.arterial", stylers: [{ visibility: "simplified" }] },
 
-  // ── Arterial roads — warm amber ────────────────────────
-  { featureType: "road.arterial", elementType: "geometry.fill", stylers: [{ color: "#FFD97D" }] },
-  { featureType: "road.arterial", elementType: "geometry.stroke", stylers: [{ color: "#C89030" }, { weight: 2 }] },
-  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#7A4A10" }] },
+  { featureType: "road.local", elementType: "geometry.fill", stylers: [{ color: "#F0E8D8" }] },
+  { featureType: "road.local", elementType: "geometry.stroke", stylers: [{ color: "#E6DCC8" }, { weight: 0.5 }] },
+  { featureType: "road.local", elementType: "labels", stylers: [{ visibility: "off" }] },
 
-  // ── Highways — bold ember orange ───────────────────────
-  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: "#F5A623" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#C07010" }, { weight: 3 }] },
-  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#FFFFFF" }] },
-  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#C07010" }, { weight: 3 }] },
+  { featureType: "road.arterial", elementType: "geometry.fill", stylers: [{ color: "#EDE4CC" }] },
+  { featureType: "road.arterial", elementType: "geometry.stroke", stylers: [{ color: "#E0D0B0" }, { weight: 0.5 }] },
+  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#8A7868" }] },
+
+  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: "#E5D4A8" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#D0B888" }, { weight: 0.75 }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#F8F4EC" }] },
+  { featureType: "road.highway", elementType: "labels.text.stroke", stylers: [{ color: "#A88860" }, { weight: 1.2 }] },
 
   // ── Water — flat cartoon blue ──────────────────────────
   { featureType: "water", elementType: "geometry", stylers: [{ color: "#8CC4E0" }] },
