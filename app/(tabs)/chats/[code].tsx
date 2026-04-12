@@ -14,6 +14,8 @@ import {
   ScrollView,
   BackHandler,
   PanResponder,
+  Modal,
+  TextInput,
 } from "react-native";
 import { Text } from "../../../components/Text";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,7 +31,7 @@ import { reverseGeocode } from "../../../utils/geocoding";
 import { setLastSeen } from "../../../utils/lastSeen";
 import { getItem, setItem, safeJsonParse } from "../../../utils/storage";
 import { ReactionBar } from "../../../components/ReactionBar";
-import { colors, cloudShape, interaction } from "../../../utils/theme";
+import { colors, cloudShape, interaction, radius } from "../../../utils/theme";
 import { ParticleTrail } from "../../../components/ParticleTrail";
 import { DecorativeCloud } from "../../../components/SkyCloud";
 import { FilteredImage } from "../../../components/FilteredImage";
@@ -43,6 +45,8 @@ import { sendMessage, type ChatMessage } from "../../../utils/messages";
 import * as Location from "expo-location";
 import { fetchMemberAvatars, DEFAULT_AVATAR, type Avatar } from "../../../utils/avatar";
 import { runWhenIdle } from "../../../utils/runWhenIdle";
+import { fetchSunsetTime } from "../../../utils/sunset";
+import { syncSharedRoomNickname } from "../../../utils/rooms";
 
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
@@ -65,6 +69,11 @@ function prefetchFirstFourFeedPhotos(postsList: FeedPhoto[]) {
 const FEED_EXPIRY_MS = 24 * 60 * 60 * 1000;
 /** Left-edge swipe to go back; narrow strip so header controls stay easy to tap. */
 const EDGE_BACK_ZONE = 28;
+
+/** Empty-state horizon accents — rgba only (per product spec). */
+const HORIZON_CIRCLE_SOFT = "rgba(232, 146, 74, 0.2)";
+const HORIZON_CIRCLE_DEEP = "rgba(212, 104, 42, 0.18)";
+const HORIZON_LINE = "rgba(212, 192, 160, 0.6)";
 /** Panel follows the finger but only up to 1/5 of the screen. */
 const MAX_EDGE_DRAG = SCREEN_W / 5;
 /** Release past this fraction of max drag (or fast flick) → pop; otherwise spring closed. */
@@ -178,6 +187,8 @@ export default function RoomThread() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
 
   // Feed state
   const [feedLoading, setFeedLoading] = useState(true);
@@ -605,6 +616,26 @@ export default function RoomThread() {
     } catch {}
   }
 
+  function openRoomSettings() {
+    setRenameDraft((nickname ?? code ?? "").trim());
+    setRenameOpen(true);
+  }
+
+  async function saveRoomRename() {
+    const name = renameDraft.trim();
+    if (!name) {
+      Alert.alert("Name required", "Enter a name for this cloud.");
+      return;
+    }
+    try {
+      await syncSharedRoomNickname(code, name);
+      setNickname(name);
+      setRenameOpen(false);
+    } catch {
+      Alert.alert("Could not save", "Please try again.");
+    }
+  }
+
   // Supabase realtime: incoming messages → chat overlay bubbles + live feed photos.
   useEffect(() => {
     if (!overlayRoomId || !myDeviceId) return;
@@ -803,6 +834,26 @@ export default function RoomThread() {
           )}
         </View>
 
+        <TouchableOpacity
+          onPress={openRoomSettings}
+          accessibilityRole="button"
+          accessibilityLabel="Cloud settings"
+          activeOpacity={interaction.activeOpacitySubtle}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            marginRight: 8,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.mist,
+            backgroundColor: "transparent",
+          }}
+        >
+          <Text style={{ fontSize: 15, color: colors.charcoal }}>⚙</Text>
+        </TouchableOpacity>
+
         {/* Share / copy code button */}
         <TouchableOpacity
           onPress={handleShare}
@@ -818,6 +869,59 @@ export default function RoomThread() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={renameOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameOpen(false)}
+      >
+        <View
+          style={{ flex: 1, backgroundColor: colors.overlayDark, justifyContent: "center", padding: 24 }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.cream,
+              borderRadius: radius.lg,
+              padding: 20,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: colors.mist,
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal, marginBottom: 12 }}>
+              Rename cloud
+            </Text>
+            <TextInput
+              value={renameDraft}
+              onChangeText={setRenameDraft}
+              placeholder="Cloud name"
+              placeholderTextColor={colors.ash}
+              autoFocus
+              style={{
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: colors.mist,
+                borderRadius: radius.sm,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                fontSize: 16,
+                color: colors.charcoal,
+                marginBottom: 16,
+              }}
+            />
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12 }}>
+              <TouchableOpacity onPress={() => setRenameOpen(false)} style={{ paddingVertical: 8, paddingHorizontal: 12 }}>
+                <Text style={{ fontSize: 15, fontWeight: "700", color: colors.ash }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => void saveRoomRename()}
+                style={{ backgroundColor: colors.charcoal, borderRadius: radius.sm, paddingVertical: 8, paddingHorizontal: 16 }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: "700", color: colors.cream }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {roomMembers.length > 0 && (
         <View style={{
@@ -950,85 +1054,58 @@ export default function RoomThread() {
 
 const MEMBER_AVATAR_SIZE = 44;
 
-/** Empty photo feed — spring-in + gentle float and halo so the cloud doesn’t feel dead. */
+/** Empty photo feed — abstract horizon, copy, and golden-hour pill. */
 function EmptyRoomFeedState({ bottomInset }: { bottomInset: number }) {
   const containerOpacity = useRef(new Animated.Value(0)).current;
-  const emojiFloat = useRef(new Animated.Value(0)).current;
-  const emojiScale = useRef(new Animated.Value(0.86)).current;
-  const haloScale = useRef(new Animated.Value(1)).current;
-  const haloOpacity = useRef(new Animated.Value(0.18)).current;
+  const horizonBob = useRef(new Animated.Value(0)).current;
+
+  const [goldenPillLine, setGoldenPillLine] = useState("golden hour · this evening");
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(containerOpacity, {
-        toValue: 1,
-        duration: 400,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.spring(emojiScale, {
-        toValue: 1,
-        tension: 120,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    let cancelled = false;
+    void fetchSunsetTime().then((info) => {
+      if (cancelled || !info) return;
+      setGoldenPillLine(`golden hour · ${info.formattedLocal} today`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    Animated.timing(containerOpacity, {
+      toValue: 1,
+      duration: 400,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
 
     const floatLoop = Animated.loop(
       Animated.sequence([
-        Animated.timing(emojiFloat, {
-          toValue: -10,
-          duration: 2400,
+        Animated.timing(horizonBob, {
+          toValue: 1,
+          duration: 2600,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(emojiFloat, {
+        Animated.timing(horizonBob, {
           toValue: 0,
-          duration: 2400,
+          duration: 2600,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-      ])
-    );
-    const haloLoop = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(haloScale, {
-            toValue: 1.14,
-            duration: 2800,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(haloOpacity, {
-            toValue: 0.38,
-            duration: 2800,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(haloScale, {
-            toValue: 1,
-            duration: 2800,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(haloOpacity, {
-            toValue: 0.14,
-            duration: 2800,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: true,
-          }),
-        ]),
       ])
     );
     floatLoop.start();
-    haloLoop.start();
     return () => {
       floatLoop.stop();
-      haloLoop.stop();
     };
-  }, [containerOpacity, emojiFloat, emojiScale, haloOpacity, haloScale]);
+  }, [containerOpacity, horizonBob]);
+
+  const horizonLift = horizonBob.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -5],
+  });
 
   return (
     <Animated.View
@@ -1041,29 +1118,114 @@ function EmptyRoomFeedState({ bottomInset }: { bottomInset: number }) {
         opacity: containerOpacity,
       }}
     >
-      <View style={{ alignItems: "center", justifyContent: "center", height: 88, marginBottom: 4 }}>
-        <Animated.View
-          pointerEvents="none"
+      <Animated.View
+        style={{
+          width: Math.min(SCREEN_W * 0.62, 260),
+          height: 108,
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
+          overflow: "hidden",
+          marginBottom: 20,
+          transform: [{ translateY: horizonLift }],
+        }}
+      >
+        <View style={{ flex: 1, position: "relative" }}>
+          {(
+            [
+              { d: 118, fill: HORIZON_CIRCLE_SOFT },
+              { d: 92, fill: HORIZON_CIRCLE_DEEP },
+              { d: 68, fill: HORIZON_CIRCLE_SOFT },
+            ] as const
+          ).map(({ d, fill }) => {
+            const r = d / 2;
+            return (
+              <View
+                key={d}
+                style={{
+                  position: "absolute",
+                  width: d,
+                  height: d,
+                  borderRadius: r,
+                  backgroundColor: fill,
+                  left: "50%",
+                  marginLeft: -r,
+                  bottom: -r,
+                }}
+              />
+            );
+          })}
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 1,
+              backgroundColor: HORIZON_LINE,
+            }}
+          />
+        </View>
+      </Animated.View>
+
+      <Text
+        style={{
+          fontSize: 17,
+          fontWeight: "500",
+          color: colors.charcoal,
+          textAlign: "center",
+        }}
+      >
+        no sunsets yet
+      </Text>
+      <Text
+        style={{
+          fontSize: 14,
+          fontStyle: "italic",
+          color: colors.ash,
+          textAlign: "center",
+          maxWidth: 220,
+          lineHeight: 22.4,
+          marginTop: 10,
+        }}
+      >
+        be the first — tap the camera when golden hour arrives
+      </Text>
+
+      <View
+        style={{
+          marginTop: 18,
+          flexDirection: "row",
+          alignItems: "center",
+          paddingVertical: 7,
+          paddingHorizontal: 12,
+          borderRadius: 20,
+          backgroundColor: colors.paperPeach,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.mist,
+          maxWidth: 280,
+        }}
+      >
+        <View
           style={{
-            position: "absolute",
-            width: 96,
-            height: 96,
-            borderRadius: 48,
-            backgroundColor: colors.amber,
-            opacity: haloOpacity,
-            transform: [{ scale: haloScale }],
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: colors.sunsetTop,
+            opacity: 0.7,
+            marginRight: 8,
           }}
         />
-        <Animated.View style={{ transform: [{ translateY: emojiFloat }, { scale: emojiScale }] }}>
-          <Text style={{ fontSize: 56 }}>🌄</Text>
-        </Animated.View>
+        <Text
+          style={{
+            fontSize: 12,
+            color: colors.ash,
+            flexShrink: 1,
+          }}
+          numberOfLines={2}
+        >
+          {goldenPillLine}
+        </Text>
       </View>
-      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, marginTop: 16, textAlign: "center" }}>
-        No sunsets yet
-      </Text>
-      <Text style={{ fontSize: 14, color: colors.ash, marginTop: 8, textAlign: "center", lineHeight: 22 }}>
-        Be the first to share a sunset here — tap the 📷 button to capture one.
-      </Text>
     </Animated.View>
   );
 }
