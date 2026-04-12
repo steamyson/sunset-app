@@ -6,7 +6,6 @@ import {
   Share,
   Platform,
   Alert,
-  Modal,
   StyleSheet,
   Animated,
   Easing,
@@ -18,28 +17,22 @@ import {
 } from "react-native";
 import { Text } from "../../../components/Text";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, router, useNavigation } from "expo-router";
+import { useLocalSearchParams, router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, sendPhoto, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../../utils/messages";
+import { fetchRoomMessagesByCode, isExpired, timeAgo, reportMessage, getReportedMessageIds, getPhotosForRoom, thumbUrl, getRoomId, type Message, type FeedPhoto } from "../../../utils/messages";
 import { deviceFallbackLabel, getDeviceId } from "../../../utils/device";
 import { getRoomNickname } from "../../../utils/nicknames";
 import { getNicknames } from "../../../utils/identity";
 import { fetchReactions, type ReactionMap, type MessageReactions } from "../../../utils/reactions";
 import { reverseGeocode } from "../../../utils/geocoding";
-import { FilteredImage } from "../../../components/FilteredImage";
 import { setLastSeen } from "../../../utils/lastSeen";
 import { getItem, setItem, safeJsonParse } from "../../../utils/storage";
 import { ReactionBar } from "../../../components/ReactionBar";
 import { colors, cloudShape, interaction } from "../../../utils/theme";
 import { ParticleTrail } from "../../../components/ParticleTrail";
 import { DecorativeCloud } from "../../../components/SkyCloud";
-import { CameraView, useCameraPermissions, type FlashMode } from "expo-camera";
-import { CropView } from "../../../components/CropView";
-import { FilterView } from "../../../components/FilterView";
-import { type FilterName, type Adjustments, DEFAULT_ADJUSTMENTS } from "../../../utils/filters";
-import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
+import { FilteredImage } from "../../../components/FilteredImage";
 import { supabase } from "../../../utils/supabase";
 import { createSignedPhotosViewUrl } from "../../../utils/photosStorage";
 import { createPost, getPostsForRoom, type Post } from "../../../utils/posts";
@@ -48,14 +41,6 @@ import { MessageOverlay, type VisibleMessage } from "../../../components/Message
 import { ChatInputBar } from "../../../components/ChatInputBar";
 import { sendMessage, type ChatMessage } from "../../../utils/messages";
 import * as Location from "expo-location";
-import { FLASH_ICON, FLASH_LABEL, nextFlashMode } from "../../../utils/cameraFlow";
-import {
-  fetchSunsetTime,
-  isWithinAnyGoldenHour,
-  nextGoldenHourWindow,
-  formatSunsetTime,
-  UNLOCK_CAMERA_FOR_TESTING,
-} from "../../../utils/sunset";
 import { fetchMemberAvatars, DEFAULT_AVATAR, type Avatar } from "../../../utils/avatar";
 import { runWhenIdle } from "../../../utils/runWhenIdle";
 
@@ -64,6 +49,8 @@ const SCREEN_H = Dimensions.get("window").height;
 const UNREAD_PHOTOS_KEY = "unread_photos_v1";
 const ROOM_CHAT_PAGE_SIZE = 40;
 const ROOM_POST_PAGE_SIZE = 12;
+/** Matches `TAB_BAR_HEIGHT` in chats index — room list clears the tab bar. */
+const TAB_BAR_CLEARANCE = 88;
 
 function prefetchFirstFourFeedPhotos(postsList: FeedPhoto[]) {
   const urls = postsList
@@ -126,39 +113,9 @@ function hasPhotoUrl(photoUrl: string | null | undefined): photoUrl is string {
 export default function RoomThread() {
   const params = useLocalSearchParams<{ code: string; unread?: string; name?: string }>();
   const code = params.code;
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
   const edgeDragX = useRef(new Animated.Value(0)).current;
-
-  useFocusEffect(
-    useCallback(() => {
-      const stackNav = navigation.getParent();
-      const tabNav = stackNav?.getParent() as { setOptions: (o: { tabBarStyle?: object }) => void } | undefined;
-      if (!tabNav?.setOptions) return;
-
-      const tabBarHeight = 68 + insets.bottom;
-      const chatsTabBarStyle = {
-        position: "absolute" as const,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "transparent" as const,
-        borderTopWidth: 0,
-        elevation: 0,
-        shadowOpacity: 0,
-        paddingBottom: insets.bottom + 8,
-        paddingTop: 10,
-        height: tabBarHeight,
-      };
-
-      tabNav.setOptions({ tabBarStyle: { display: "none", height: 0 } });
-
-      return () => {
-        tabNav.setOptions({ tabBarStyle: chatsTabBarStyle });
-      };
-    }, [navigation, insets.bottom])
-  );
 
   const handleBack = useCallback(() => {
     router.back();
@@ -232,20 +189,6 @@ export default function RoomThread() {
   const [chatHasMore, setChatHasMore] = useState(true);
   const [chatLoadingMore, setChatLoadingMore] = useState(false);
 
-  // ─── In-room camera ───────────────────────────────────────────────────────
-  const [showCamera, setShowCamera]       = useState(false);
-  const [rawPhoto,   setRawPhoto]         = useState<string | null>(null);
-  const [photo,      setPhoto]            = useState<string | null>(null);
-  const [showCrop,   setShowCrop]         = useState(false);
-  const [showFilter, setShowFilter]       = useState(false);
-  const [activeFilter, setActiveFilter]   = useState<FilterName>("original");
-  const [activeAdj, setActiveAdj]         = useState<Adjustments>({ ...DEFAULT_ADJUSTMENTS });
-  const [flash, setFlash]                 = useState<FlashMode>("off");
-  const [sending, setSending]             = useState(false);
-  const [sendError, setSendError]         = useState<string | null>(null);
-  const [permission, requestPermission]   = useCameraPermissions();
-  const capturingRef = useRef(false);
-  const cameraRef = useRef<CameraView>(null);
   const sunsetAnim = useRef(new Animated.Value(0)).current;
   const sunsetScale = useRef(new Animated.Value(0.8)).current;
   const roomIdRef = useRef<string | null>(null);
@@ -396,97 +339,6 @@ export default function RoomThread() {
     if (loadedCodeRef.current !== snapshotCode) return;
     setMemberDisplayNames(names);
     setMemberAvatarsMap(avatars);
-  }
-
-  function resetCamera() {
-    setRawPhoto(null); setPhoto(null);
-    setShowCrop(false); setShowFilter(false);
-    setActiveFilter("original"); setActiveAdj({ ...DEFAULT_ADJUSTMENTS });
-    setSendError(null);
-  }
-
-  function closeCamera() { resetCamera(); setShowCamera(false); }
-
-  function cycleFlash() {
-    setFlash((prev) => nextFlashMode(prev));
-  }
-
-  async function takePicture() {
-    if (capturingRef.current) return;
-    capturingRef.current = true;
-    try {
-      const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
-      if (result?.uri) { setRawPhoto(result.uri); setShowCrop(true); }
-    } catch (e) {
-      console.warn("takePicture failed:", e);
-    } finally {
-      capturingRef.current = false;
-    }
-  }
-
-  async function handleSend() {
-    if (!photo) return;
-    setSending(true); setSendError(null);
-    let optimisticId: string | null = null;
-    try {
-      const [deviceId, roomRes] = await Promise.all([
-        getDeviceId(),
-        supabase
-          .from("rooms")
-          .select("id")
-          .eq("code", code.toUpperCase())
-          .maybeSingle(),
-      ]);
-      const room = roomRes.data;
-      if (roomRes.error) throw new Error(roomRes.error.message);
-      if (!room) throw new Error("Cloud not found.");
-
-      optimisticId = `__opt__${Date.now()}`;
-      const optimistic: FeedPhoto = {
-        id: optimisticId,
-        room_id: room.id,
-        device_id: deviceId,
-        photo_url: photo,
-        created_at: new Date().toISOString(),
-        filter: activeFilter,
-        adjustments: JSON.stringify(activeAdj),
-      };
-      setPosts((prev) => [optimistic, ...prev]);
-
-      await sendPhoto({
-        uri: photo,
-        roomCodes: [code],
-        deviceId,
-        filter: activeFilter,
-        adjustments: activeAdj,
-      });
-
-      const fresh = await getPhotosForRoom(room.id, { from: 0, to: ROOM_POST_PAGE_SIZE - 1 });
-      setPosts(fresh);
-
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      closeCamera();
-      const [msgs, reported] = await Promise.all([fetchRoomMessagesByCode(code), getReportedMessageIds()]);
-      const filtered = msgs.filter((m) => !reported.has(m.id) && hasPhotoUrl(m.photo_url));
-      const sorted = [...filtered].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-      const uniqueIds = [...new Set(filtered.map((m) => m.sender_device_id))];
-      const [names, rxns] = await Promise.all([
-        getNicknames(uniqueIds),
-        fetchReactions(filtered.map((m) => m.id)),
-      ]);
-      setMessages(sorted);
-      setSenderNames(names);
-      setReactions(rxns);
-    } catch (e: any) {
-      if (optimisticId) {
-        setPosts((prev) => prev.filter((p) => p.id !== optimisticId));
-      }
-      setSendError(e.message ?? "Failed to send.");
-    } finally {
-      setSending(false);
-    }
   }
 
   async function loadFeed(reset = true) {
@@ -1003,7 +855,7 @@ export default function RoomThread() {
       {loading ? (
         <ActivityIndicator color={colors.ember} style={{ marginTop: 80 }} size="large" />
       ) : loadError ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: 80 }}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + 12 }}>
           <Text style={{ fontSize: 18, fontWeight: "700", color: colors.charcoal, textAlign: "center" }}>
             Couldn&apos;t load this cloud
           </Text>
@@ -1022,7 +874,7 @@ export default function RoomThread() {
           </TouchableOpacity>
         </View>
       ) : messages.length === 0 ? (
-        <EmptyRoomFeedState />
+        <EmptyRoomFeedState bottomInset={insets.bottom + TAB_BAR_CLEARANCE + 12} />
       ) : (
         <FlatList
           data={messages}
@@ -1031,7 +883,7 @@ export default function RoomThread() {
           initialNumToRender={5}
           maxToRenderPerBatch={5}
           windowSize={5}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + 12 }}
           renderItem={({ item: msg, index: msgIndex }) => (
             <MessageBubble
               message={msg}
@@ -1073,167 +925,25 @@ export default function RoomThread() {
           ) : null}
         />
       )}
-
-      {/* Floating camera button — same style as the tab bar camera button */}
-      <TouchableOpacity
-        onPress={async () => {
-          if (!UNLOCK_CAMERA_FOR_TESTING) {
-            const info = await fetchSunsetTime();
-            if (info && !isWithinAnyGoldenHour(info)) {
-              const next = nextGoldenHourWindow(info);
-              Alert.alert(
-                "Not quite golden hour",
-                `Next window: ${next.label} at ${formatSunsetTime(next.startsAt)}.`
-              );
-              return;
-            }
-          }
-          if (!permission?.granted) { requestPermission(); return; }
-          resetCamera();
-          setShowCamera(true);
-        }}
-        activeOpacity={interaction.activeOpacitySubtle}
-        style={{
-          position: "absolute",
-          bottom: 28,
-          alignSelf: "center",
-          left: "50%",
-          marginLeft: -32,
-          width: 64, height: 64, borderRadius: 32,
-          backgroundColor: colors.ember,
-          alignItems: "center", justifyContent: "center",
-          shadowColor: colors.ember,
-          shadowOffset: { width: 0, height: 6 },
-          shadowOpacity: 0.45, shadowRadius: 10, elevation: 10,
-        }}
-      >
-        <Ionicons name="camera" size={28} color="white" />
-      </TouchableOpacity>
     </SafeAreaView>
     </View>
-
-    {/* ─── Camera modal ──────────────────────────────────────────────────── */}
-    <Modal visible={showCamera} animationType="slide" statusBarTranslucent>
-
-      {showCrop && rawPhoto ? (
-        <CropView
-          uri={rawPhoto}
-          onDone={(croppedUri) => { setPhoto(croppedUri); setShowCrop(false); setShowFilter(true); }}
-          onSkip={() => { setPhoto(rawPhoto); setShowCrop(false); setShowFilter(true); }}
-          onBack={() => { setRawPhoto(null); setShowCrop(false); }}
-        />
-      ) : showFilter && photo ? (
-        <FilterView
-          uri={photo}
-          onDone={(filter, adjustments) => { setActiveFilter(filter); setActiveAdj(adjustments); setShowFilter(false); }}
-          onBack={() => { setPhoto(null); setShowFilter(false); setShowCrop(true); }}
-        />
-      ) : photo ? (
-        <View style={{ flex: 1, backgroundColor: "black" }}>
-          <FilteredImage uri={photo} filter={activeFilter} adjustments={activeAdj} width={SCREEN_W} height={SCREEN_H} />
-
-          {sendError && (
-            <View style={{
-              position: "absolute", top: 60, left: 24, right: 24,
-              backgroundColor: colors.magenta, padding: 12, borderRadius: 12,
-            }}>
-              <Text style={{ color: "white", textAlign: "center", fontWeight: "600" }}>{sendError}</Text>
-            </View>
-          )}
-
-          <View style={{
-            position: "absolute", bottom: 0, left: 0, right: 0,
-            flexDirection: "row", gap: 14, padding: 28,
-            paddingBottom: Platform.OS === "ios" ? 48 : 32,
-          }}>
-            <TouchableOpacity
-              onPress={resetCamera}
-              activeOpacity={interaction.activeOpacitySubtle}
-              style={{
-                flex: 1, backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 18,
-                borderRadius: 18, alignItems: "center",
-                borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
-              }}
-            >
-              <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Retake</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleSend}
-              disabled={sending}
-              activeOpacity={interaction.activeOpacitySubtle}
-              style={{ flex: 2, backgroundColor: colors.ember, paddingVertical: 18, borderRadius: 18, alignItems: "center" }}
-            >
-              {sending ? <ActivityIndicator color="white" /> : (
-                <Text style={{ color: "white", fontWeight: "700", fontSize: 16 }}>Send  🌅</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : (
-        <View style={{ flex: 1, backgroundColor: "black" }}>
-          <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back" flash={flash} />
-
-          {/* Close */}
-          <TouchableOpacity
-            onPress={closeCamera}
-            style={{
-              position: "absolute", top: 56, left: 24,
-              width: 44, height: 44, borderRadius: 22,
-              backgroundColor: "rgba(0,0,0,0.45)",
-              alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <Text style={{ color: "white", fontSize: 18, fontWeight: "600" }}>✕</Text>
-          </TouchableOpacity>
-
-          {/* Flash toggle */}
-          <TouchableOpacity
-            onPress={cycleFlash}
-            style={{
-              position: "absolute", top: 56, right: 24,
-              height: 44, paddingHorizontal: 14, borderRadius: 22,
-              backgroundColor: flash === "off" ? "rgba(0,0,0,0.45)" : "rgba(255,200,0,0.85)",
-              flexDirection: "row", alignItems: "center", gap: 6,
-            }}
-          >
-            <Ionicons name={FLASH_ICON[flash]} size={18} color="white" />
-            <Text style={{ color: "white", fontWeight: "700", fontSize: 13 }}>{FLASH_LABEL[flash]}</Text>
-          </TouchableOpacity>
-
-          {/* Shutter */}
-          <View style={{ position: "absolute", bottom: 56, alignSelf: "center" }}>
-            <TouchableOpacity
-              onPress={takePicture}
-              activeOpacity={interaction.activeOpacitySubtle}
-              style={{
-                width: 80, height: 80, borderRadius: 40,
-                backgroundColor: "white", borderWidth: 5, borderColor: colors.ember,
-              }}
-            />
-          </View>
-        </View>
-      )}
-    </Modal>
 
     </ParticleTrail>
       </Animated.View>
 
-      {!showCamera && (
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <View
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: EDGE_BACK_ZONE,
-            }}
-            collapsable={false}
-            {...edgeBackPan.panHandlers}
-          />
-        </View>
-      )}
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+        <View
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: EDGE_BACK_ZONE,
+          }}
+          collapsable={false}
+          {...edgeBackPan.panHandlers}
+        />
+      </View>
     </View>
   );
 }
@@ -1241,7 +951,7 @@ export default function RoomThread() {
 const MEMBER_AVATAR_SIZE = 44;
 
 /** Empty photo feed — spring-in + gentle float and halo so the cloud doesn’t feel dead. */
-function EmptyRoomFeedState() {
+function EmptyRoomFeedState({ bottomInset }: { bottomInset: number }) {
   const containerOpacity = useRef(new Animated.Value(0)).current;
   const emojiFloat = useRef(new Animated.Value(0)).current;
   const emojiScale = useRef(new Animated.Value(0.86)).current;
@@ -1327,7 +1037,7 @@ function EmptyRoomFeedState() {
         alignItems: "center",
         justifyContent: "center",
         paddingHorizontal: 32,
-        paddingBottom: 80,
+        paddingBottom: bottomInset,
         opacity: containerOpacity,
       }}
     >
