@@ -301,24 +301,50 @@ export default function HomeScreen() {
           <View style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", paddingBottom: 72, paddingHorizontal: 36 }}>
             {sunInfo && headline ? (
               <Animated.View style={{ alignItems: "center", opacity: contentOpacity, transform: [{ translateY: contentSlideY }] }}>
-                <Text style={{ fontSize: 12, color: colors.ash, letterSpacing: 3, textTransform: "uppercase", marginBottom: 10 }}>
-                  {subline ?? "until golden hour"}
+                <Text style={{ fontSize: 15, color: colors.ash, textAlign: "center", marginBottom: 6 }}>
+                  {subline ?? "Until golden hour"}
                 </Text>
-                <Text style={{ fontSize: 56, fontWeight: "900", color: colors.charcoal, letterSpacing: -2, lineHeight: 60 }}>
-                  {headline}
-                </Text>
-                {countdown && (
-                  <Animated.View style={{
-                    marginTop: 16, backgroundColor: colors.ember,
-                    paddingHorizontal: 22, paddingVertical: 10, borderRadius: 22,
-                    transform: [{ scale: countdownBump }],
-                  }}>
-                    <Text style={{ fontSize: 18, fontWeight: "800", color: "white", letterSpacing: -0.5 }}>
-                      {subline ? `${countdown} left` : `in ${countdown}`}
+                {subline ? (
+                  <>
+                    <Text style={{ fontSize: 34, fontWeight: "800", color: colors.charcoal, textAlign: "center", lineHeight: 38 }}>
+                      {headline}
                     </Text>
-                  </Animated.View>
+                    {countdown && (
+                      <Animated.View style={{ marginTop: 10, transform: [{ scale: countdownBump }] }}>
+                        <Text style={{ fontSize: 28, fontWeight: "800", color: colors.ember, textAlign: "center", lineHeight: 32 }}>
+                          {`${countdown} left`}
+                        </Text>
+                      </Animated.View>
+                    )}
+                  </>
+                ) : (
+                  countdown && (
+                    <Animated.View style={{ marginTop: 6, transform: [{ scale: countdownBump }] }}>
+                      <View
+                        style={{
+                          borderWidth: 1,
+                          borderColor: colors.ash,
+                          borderRadius: 26,
+                          paddingHorizontal: 18,
+                          paddingVertical: 10,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 21,
+                            fontWeight: "800",
+                            color: colors.ember,
+                            textAlign: "center",
+                            lineHeight: 25,
+                          }}
+                        >
+                          {`${headline} in ${countdown}`}
+                        </Text>
+                      </View>
+                    </Animated.View>
+                  )
                 )}
-                <Text style={{ fontSize: 15, color: colors.ash, marginTop: 28, textAlign: "center", lineHeight: 24 }}>
+                <Text style={{ fontSize: 15, color: colors.ash, marginTop: 22, textAlign: "center", lineHeight: 24 }}>
                   {subline
                     ? "The sky is wide open.\nShare the light while it lasts."
                     : "The sky is yours to catch.\nDon\u2019t let it slip away."}
