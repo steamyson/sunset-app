@@ -28,7 +28,7 @@ export function triggerIntroReset() {
  * so the app behaves as if opened for the very first time.
  * Set the right-hand side to `false` when you want normal behavior while developing.
  */
-const FORCE_FRESH_INSTALL = __DEV__ && true;
+const FORCE_FRESH_INSTALL = __DEV__ && false;
 
 const ALL_STORAGE_KEYS: string[] = [
   "onboarding_complete",
