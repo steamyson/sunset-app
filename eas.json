@@ -21,6 +21,9 @@
       }
     },
     "production": {
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://steamyson.github.io/sunset-app/"
       }
