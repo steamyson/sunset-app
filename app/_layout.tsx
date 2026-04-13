@@ -17,6 +17,12 @@ import { SunriseIntro } from "../components/SunriseIntro";
 import { markIntroFinished } from "../utils/introGate";
 import { joinRoom, ROOM_MEMBERSHIP_LIMIT_MESSAGE } from "../utils/rooms";
 
+/** Called by resetDevice flow to replay the full intro + onboarding sequence. */
+let _resetIntroCallback: (() => void) | null = null;
+export function triggerIntroReset() {
+  _resetIntroCallback?.();
+}
+
 /**
  * When `true` (only in dev), onboarding is shown on every cold start so you can re-test the flow.
  * Set the right-hand side to `false` when you want normal “complete once” behavior while developing.
@@ -38,6 +44,12 @@ function extractRoomCode(url: string): string | null {
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({ Caveat_400Regular, Caveat_700Bold });
   const [showIntro, setShowIntro] = useState(true);
+
+  // Register reset callback so profile.tsx can replay the full intro + onboarding.
+  useEffect(() => {
+    _resetIntroCallback = () => setShowIntro(true);
+    return () => { _resetIntroCallback = null; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

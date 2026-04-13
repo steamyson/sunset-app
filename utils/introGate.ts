@@ -11,6 +11,12 @@ export function markIntroFinished() {
   }
 }
 
+/** Reset intro state so SunriseIntro will play again (e.g. after account reset). */
+export function resetIntroGate() {
+  introFinished = false;
+  waiters.length = 0;
+}
+
 const FALLBACK_MS = 10_000;
 
 export function waitForIntroFinished(): Promise<void> {

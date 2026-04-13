@@ -40,6 +40,8 @@ import {
   deleteAccountAndEraseData,
   resetDevice,
 } from "../../utils/auth";
+import { resetIntroGate } from "../../utils/introGate";
+import { triggerIntroReset } from "../_layout";
 import type { User } from "@supabase/supabase-js";
 import { deviceFallbackLabel, getDeviceId } from "../../utils/device";
 import { fetchSunsetTime, type SunsetInfo } from "../../utils/sunset";
@@ -410,6 +412,9 @@ export default function ProfileScreen() {
               setResettingDevice(true);
               try {
                 await resetDevice();
+                // Replay the full intro + onboarding sequence as if freshly installed.
+                resetIntroGate();
+                triggerIntroReset();
                 router.replace("/setup");
               } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : "Something went wrong.";
