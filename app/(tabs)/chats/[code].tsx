@@ -124,6 +124,11 @@ export default function RoomThread() {
   const code = params.code;
   const insets = useSafeAreaInsets();
 
+  // Guard against stale navigation state (e.g. after account reset) where code is undefined
+  useEffect(() => {
+    if (!code) router.replace("/(tabs)/chats");
+  }, [code]);
+
   const edgeDragX = useRef(new Animated.Value(0)).current;
 
   const handleBack = useCallback(() => {
@@ -325,6 +330,7 @@ export default function RoomThread() {
   }
 
   async function hydrateRoomMeta() {
+    if (!code) return;
     const upper = code.toUpperCase();
     const snapshotCode = code;
     const [localNick, roomRes] = await Promise.all([
@@ -725,6 +731,8 @@ export default function RoomThread() {
       cancelled = true;
     };
   }, []);
+
+  if (!code) return null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.sky }}>

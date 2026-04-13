@@ -1,7 +1,7 @@
-import { supabase } from "./supabase";
+import { supabase, setDeviceSessionWithRetry } from "./supabase";
 import { FunctionsHttpError, type User } from "@supabase/supabase-js";
 import { PHOTOS_BUCKET, photosPathFromStoredRef } from "./photosStorage";
-import { getDeviceId } from "./device";
+import { getDeviceId, resetDeviceId } from "./device";
 import { getLocalRoomCodes, addLocalRoomCode, clearAllLocalRooms } from "./rooms";
 import {
   assignDefaultRoomNickname,
@@ -10,6 +10,7 @@ import {
 } from "./nicknames";
 import { invalidateRoomCache } from "./roomCache";
 import { clearReportedCache } from "./messages";
+import { deleteItem } from "./storage";
 import * as Linking from "expo-linking";
 
 const POST_MEDIA_BUCKET = "post-media";
@@ -286,4 +287,66 @@ export async function deleteAccountAndEraseData(): Promise<void> {
   await clearAllRoomNicknames();
   invalidateRoomCache();
   clearReportedCache();
+}
+
+/**
+ * Device-level reset: wipes all server data for this device and clears local storage.
+ * Works without an auth session — uses the device session GUC set at launch.
+ * After this call the caller should navigate to /setup; the next getDeviceId() returns a fresh UUID.
+ */
+export async function resetDevice(): Promise<void> {
+  const deviceId = await getDeviceId();
+
+  // 1. Collect photo paths for client-side storage cleanup (best-effort)
+  const { data: pathPayload } = await supabase.rpc("get_device_storage_paths", { p_device_id: deviceId });
+  if (pathPayload && typeof pathPayload === "object") {
+    const raw = pathPayload as Record<string, unknown>;
+    const photoRefs = Array.isArray(raw.photoRefs)
+      ? (raw.photoRefs as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
+    const avatarPath = typeof raw.avatarPath === "string" ? raw.avatarPath : null;
+    const localUriPattern = /^(file|content|blob):/i;
+    const keys = new Set<string>();
+    if (avatarPath && !localUriPattern.test(avatarPath)) keys.add(avatarPath);
+    for (const ref of photoRefs) {
+      const p = photosPathFromStoredRef(ref);
+      if (p && !localUriPattern.test(p)) keys.add(p);
+    }
+    if (keys.size > 0) {
+      await removeStorageObjectsBestEffort(PHOTOS_BUCKET, [...keys]);
+    }
+  }
+
+  // 2. Wipe server-side data for this device
+  const { error: rpcError } = await supabase.rpc("reset_device_data", { p_device_id: deviceId });
+  if (rpcError) throw new Error(rpcError.message);
+
+  // 3. Sign out of auth if signed in
+  try { await supabase.auth.signOut(); } catch { /* ignore */ }
+
+  // 4. Clear all local storage keys
+  await Promise.all([
+    deleteItem("dusk_nickname"),
+    deleteItem("dusk_avatar"),
+    deleteItem("dusk_streak_v1"),
+    deleteItem("dusk_reported_message_ids"),
+    deleteItem("dusk_last_seen"),
+    deleteItem("my_map_pins_v1"),
+    deleteItem("dusk_sunset_alerts_enabled"),
+    deleteItem("dusk_alert_last_scheduled"),
+    deleteItem("unread_photos_v1"),
+    deleteItem("cloud_pos_v2"),
+    deleteItem("profile_photo_uri"),
+    deleteItem("onboarding_complete"),
+  ]);
+  await clearAllLocalRooms();
+  await clearAllRoomNicknames();
+
+  // 5. Invalidate in-memory caches
+  invalidateRoomCache();
+  clearReportedCache();
+
+  // 6. Generate new device ID and immediately establish a new device session
+  const newDeviceId = await resetDeviceId();
+  setDeviceSessionWithRetry(newDeviceId).catch(() => {});
 }

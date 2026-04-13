@@ -16,6 +16,14 @@ export async function setItem(key: string, value: string): Promise<void> {
   return SecureStore.setItemAsync(key, value);
 }
 
+export async function deleteItem(key: string): Promise<void> {
+  if (Platform.OS === "web") {
+    localStorage.removeItem(key);
+    return;
+  }
+  await SecureStore.deleteItemAsync(key);
+}
+
 export function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try { return JSON.parse(raw) as T; } catch { return fallback; }

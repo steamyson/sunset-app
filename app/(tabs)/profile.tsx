@@ -38,6 +38,7 @@ import {
   signOut,
   signInWithGoogle,
   deleteAccountAndEraseData,
+  resetDevice,
 } from "../../utils/auth";
 import type { User } from "@supabase/supabase-js";
 import { deviceFallbackLabel, getDeviceId } from "../../utils/device";
@@ -131,6 +132,7 @@ export default function ProfileScreen() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [resettingDevice, setResettingDevice] = useState(false);
 
   const contentOpacity = useRef(new Animated.Value(0)).current;
 
@@ -392,6 +394,34 @@ export default function ProfileScreen() {
         },
       },
     ]);
+  }
+
+  function handleResetDevice() {
+    Alert.alert(
+      "Reset account?",
+      "This will remove you from all rooms and delete your photos. Your device will start fresh as if newly installed. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setResettingDevice(true);
+              try {
+                await resetDevice();
+                router.replace("/setup");
+              } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : "Something went wrong.";
+                Alert.alert("Reset failed", msg);
+              } finally {
+                setResettingDevice(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
   }
 
   function handleDeleteAccount() {
@@ -789,6 +819,28 @@ export default function ProfileScreen() {
           >
             <Text style={{ fontSize: 16, fontWeight: "700", color: colors.charcoal }}>Privacy policy</Text>
             <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />
+          <TouchableOpacity
+            onPress={handleResetDevice}
+            activeOpacity={interaction.activeOpacity}
+            disabled={resettingDevice}
+            style={{
+              paddingVertical: 18,
+              paddingHorizontal: 20,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.magenta }}>Reset account</Text>
+              <Text style={{ fontSize: 12, color: colors.ash, marginTop: 4, lineHeight: 16 }}>
+                Leave all rooms and start fresh on this device
+              </Text>
+            </View>
+            {resettingDevice ? <ActivityIndicator color={colors.magenta} size="small" /> : <Text style={{ fontSize: 18, color: colors.ash }}>›</Text>}
           </TouchableOpacity>
 
           <View style={{ height: 1, backgroundColor: colors.mist, marginHorizontal: 20 }} />

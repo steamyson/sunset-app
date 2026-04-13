@@ -16,6 +16,14 @@ export async function getDeviceId(): Promise<string> {
   return id;
 }
 
+/** Replace the stored device ID with a fresh UUID and update the in-memory cache. */
+export async function resetDeviceId(): Promise<string> {
+  const newId = Crypto.randomUUID();
+  await setItem(DEVICE_ID_KEY, newId);
+  cachedDeviceId = newId;
+  return newId;
+}
+
 /** Short label when no synced nickname exists (stable for a given device id). */
 export function deviceFallbackLabel(deviceId: string): string {
   const compact = deviceId.replace(/-/g, "");
