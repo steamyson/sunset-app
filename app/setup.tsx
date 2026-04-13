@@ -58,7 +58,7 @@ export default function SetupScreen() {
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
-    ]).start(() => router.replace("/"));
+    ]).start(() => router.replace("/(tabs)/chats"));
   }
 
   return (

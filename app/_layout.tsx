@@ -7,7 +7,7 @@ import { useFonts } from "expo-font";
 import { Caveat_400Regular, Caveat_700Bold } from "@expo-google-fonts/caveat";
 import { initNotifications } from "../utils/notifications";
 import { getLocalNickname } from "../utils/identity";
-import { getItem, setItem } from "../utils/storage";
+import { getItem, setItem, deleteItem } from "../utils/storage";
 import { getDeviceId } from "../utils/device";
 import { supabase, setDeviceSessionWithRetry } from "../utils/supabase";
 import { registerPushToken } from "../utils/push";
@@ -24,10 +24,31 @@ export function triggerIntroReset() {
 }
 
 /**
- * When `true` (only in dev), onboarding is shown on every cold start so you can re-test the flow.
- * Set the right-hand side to `false` when you want normal “complete once” behavior while developing.
+ * When `true` (only in dev), every cold start wipes all SecureStore keys
+ * so the app behaves as if opened for the very first time.
+ * Set the right-hand side to `false` when you want normal behavior while developing.
  */
-const FORCE_ONBOARDING_UX_PREVIEW = __DEV__ && true;
+const FORCE_FRESH_INSTALL = __DEV__ && true;
+
+const ALL_STORAGE_KEYS: string[] = [
+  "onboarding_complete",
+  "profile_photo_uri",
+  "dusk_device_id",
+  "dusk_nickname",
+  "dusk_avatar",
+  "dusk_nicknames",
+  "dusk_rooms",
+  "dusk_last_seen",
+  "dusk_streak_v1",
+  "dusk_sunset_cache",
+  "dusk_sunset_alerts_enabled",
+  "dusk_alert_last_scheduled",
+  "dusk_reported_message_ids",
+  "my_map_pins_v1",
+  "cloud_pos_v2",
+  "unread_photos_v1",
+  "home_swipe_hint_visits_v1",
+];
 
 function extractRoomCode(url: string): string | null {
   const parsed = Linking.parse(url);
@@ -92,8 +113,11 @@ export default function RootLayout() {
 
     async function init() {
       await initNotifications();
-      if (FORCE_ONBOARDING_UX_PREVIEW) {
-        await setItem("onboarding_complete", "");
+      if (FORCE_FRESH_INSTALL) {
+        await Promise.all([
+          ...ALL_STORAGE_KEYS.map((k) => deleteItem(k)),
+          supabase.auth.signOut().catch(() => {}),
+        ]);
       }
       const [nickname, deviceId] = await Promise.all([getLocalNickname(), getDeviceId()]);
       if (deviceId) {
@@ -107,13 +131,13 @@ export default function RootLayout() {
       const user = await getAuthUser();
       if (user) linkDeviceToUser(user.id).catch(() => {});
 
-      if (!nickname) {
-        router.replace("/setup");
-        return;
-      }
       const onboardingDone = await getItem("onboarding_complete");
       if (!onboardingDone) {
         router.replace("/onboarding");
+        return;
+      }
+      if (!nickname) {
+        router.replace("/setup");
         return;
       }
       router.replace("/home");

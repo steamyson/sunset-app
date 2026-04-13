@@ -123,12 +123,12 @@ export default function OnboardingScreen() {
       await saveAvatar({ type: "photo", uri: photoUriStored });
     }
     await setItem("onboarding_complete", "true");
-    router.replace("/home");
+    router.replace("/setup");
   }
 
   async function skip() {
     await setItem("onboarding_complete", "true");
-    router.replace("/home");
+    router.replace("/setup");
   }
 
   function renderStep() {
